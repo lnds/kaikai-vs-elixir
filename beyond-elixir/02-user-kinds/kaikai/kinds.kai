@@ -1,0 +1,12 @@
+kind Metric   : AbelianGroup with metric
+kind Imperial : AbelianGroup with imperial
+
+metric m
+imperial ft
+
+# `m` and `ft` are habitants of DIFFERENT user-declared kinds. Adding across
+# kinds is a compile error even though both "mean" a length — the kind system
+# is extensible, not a fixed built-in list. This does NOT compile.
+fn total(a: Real<m>, b: Real<ft>) : Real<m> = a + b
+
+fn main() : Unit / Stdout = Stdout.print("unreachable")

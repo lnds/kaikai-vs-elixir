@@ -1,0 +1,12 @@
+unit m
+unit s
+
+# The unit rides the type. `m/s` is dimensionally checked at compile time,
+# with zero runtime cost — the units are phantom, erased after type-checking.
+fn speed(dist: Real<m>, time: Real<s>) : Real<m/s> = dist / time
+
+fn main() : Unit / Stdout = {
+  let v = speed(100.0<m>, 9.58<s>)
+  let raw = v * 1.0<s/m>              # cancel to a dimensionless Real to print
+  Stdout.print("speed = #{real_to_string(raw)} m/s")
+}

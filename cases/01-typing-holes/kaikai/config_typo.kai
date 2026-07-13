@@ -1,0 +1,12 @@
+type AppConfig = { timeout: Int, retries: Int }
+
+fn load() : AppConfig = AppConfig { timeout: 30, retries: 3 }
+
+# `cfg.retires` is the same typo. This file does NOT compile: a record
+# field access is checked against the record type, and the error carries
+# a did-you-mean. There is no warning tier to ignore.
+fn main() : Unit / Stdout = {
+  let cfg = load()
+  Stdout.print("timeout: #{int_to_string(cfg.timeout)}")
+  Stdout.print("retries: #{int_to_string(cfg.retires)}")
+}

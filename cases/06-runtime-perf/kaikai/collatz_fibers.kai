@@ -1,0 +1,32 @@
+import spawn
+import os.args
+
+fn collatz(n: Int, steps: Int) : Int =
+  if n == 1 { steps }
+  else if n % 2 == 0 { collatz(n / 2, steps + 1) }
+  else { collatz(3 * n + 1, steps + 1) }
+
+fn scan_shard(i: Int, limit: Int, stride: Int, best: Int) : Int =
+  if i >= limit { best }
+  else {
+    let s = collatz(i, 0)
+    if s > best { scan_shard(i + stride, limit, stride, s) }
+    else { scan_shard(i + stride, limit, stride, best) }
+  }
+
+fn parse_limit(a: [String]) : Int = match a {
+  [first, ..._] -> match string_to_int(first) { Some(n) -> n  None -> 1000000 }
+  []            -> 1000000
+}
+
+fn main() : Int / Spawn + Stdout + Env = {
+  let limit = parse_limit(argv())
+  let workers = 8
+  let bests = nursery { n ->
+    let fibers = [1..workers] | (w => n.spawn(() => scan_shard(w, limit, workers, 0)))
+    fibers | (f => n.await(f))
+  }
+  let best = foldr(bests, 0, (a, b) => if a > b { a } else { b })
+  Stdout.print("best steps=#{int_to_string(best)} (fibers=#{int_to_string(workers)})")
+  0
+}

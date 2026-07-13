@@ -1,0 +1,17 @@
+# The same contract, called with an amount that exceeds the balance. The
+# precondition `amount <= balance` is violated. The value comes through a
+# binding (not a bare literal), so the check fires at runtime and panics with
+# a structured diagnostic naming the clause, the function, the predicate, and
+# the declaration site.
+fn withdraw(balance: Int, amount: Int) : Int
+  requires amount > 0
+  requires amount <= balance
+  ensures result >= 0
+{
+  balance - amount
+}
+
+fn main() : Unit / Stdout = {
+  let over = 500
+  Stdout.print("#{int_to_string(withdraw(100, over))}")
+}

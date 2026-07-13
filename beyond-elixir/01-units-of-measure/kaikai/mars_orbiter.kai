@@ -1,0 +1,10 @@
+unit m
+unit ft
+
+# The Mars Climate Orbiter bug (1999): one module produced pound-seconds,
+# another expected newton-seconds; nothing caught the mismatch and the probe
+# was lost. Here metres and feet cannot be added — it is a compile error.
+# This does NOT compile.
+fn total(a: Real<m>, b: Real<ft>) : Real<m> = a + b
+
+fn main() : Unit / Stdout = Stdout.print("unreachable")

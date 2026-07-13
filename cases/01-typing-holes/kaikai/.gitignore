@@ -1,0 +1,4 @@
+*.beam
+*.o
+hello_kai
+collatz_kai*

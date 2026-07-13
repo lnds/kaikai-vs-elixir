@@ -1,0 +1,12 @@
+type Shape = Circle(Real) | Square(Real) | Triangle(Real, Real)
+
+# The same match with the Triangle arm removed — the exact state the
+# Elixir version ships in. This does NOT compile; the error names the
+# missing variant.
+fn area(s: Shape) : Real = match s {
+  Circle(r)        -> 3.14159 * r * r
+  Square(side)     -> side * side
+}
+
+fn main() : Unit / Stdout =
+  Stdout.print("triangle: #{real_to_string(area(Triangle(3.0, 4.0)))}")

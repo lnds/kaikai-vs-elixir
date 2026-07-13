@@ -1,0 +1,17 @@
+# Design-by-Contract: `requires` states preconditions the caller must satisfy,
+# `ensures` states postconditions the function guarantees. `result` names the
+# return value; the arguments stay in scope. Predicates must be effect-pure.
+# Checks run at runtime (SMT-free, Eiffel/Ada/D lineage) and, for statically
+# known literal arguments, at compile time.
+fn withdraw(balance: Int, amount: Int) : Int
+  requires amount > 0
+  requires amount <= balance
+  ensures result >= 0
+  ensures result == balance - amount
+{
+  balance - amount
+}
+
+fn main() : Unit / Stdout = {
+  Stdout.print("balance after withdraw: #{int_to_string(withdraw(100, 30))}")
+}

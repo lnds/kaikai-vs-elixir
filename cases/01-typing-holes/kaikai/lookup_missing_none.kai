@@ -1,0 +1,10 @@
+import collections.map
+
+# The same lookup with the None arm removed. This does NOT compile:
+# the checker reports the missing case as a compile error, not a nil
+# that flows onward. Forgetting "the key is absent" cannot ship.
+fn lookup(m: Map[String, Int], k: String) : String = match m[k] {
+  Some(v) -> "found #{int_to_string(v)}"
+}
+
+fn main() : Unit / Stdout = Stdout.print(lookup(%{ "a": 1 }, "a"))

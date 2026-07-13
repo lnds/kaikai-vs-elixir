@@ -1,0 +1,14 @@
+import collections.map
+
+# A Map read returns Option[v], never a silent nil. The absence of a key
+# is a distinct value (None) the type system forces every caller to handle.
+fn lookup(m: Map[String, Int], k: String) : String = match m[k] {
+  Some(v) -> "found #{int_to_string(v)}"
+  None    -> "absent"
+}
+
+fn main() : Unit / Stdout = {
+  let prices = %{ "apple": 3, "pear": 5 }
+  Stdout.print(lookup(prices, "apple"))
+  Stdout.print(lookup(prices, "banana"))
+}

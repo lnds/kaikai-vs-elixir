@@ -1,0 +1,28 @@
+import os.args
+
+# Idiomatic kaikai: tail recursion with an accumulator. No `var`, no `while`
+# helper — the compiler turns each of these into a direct jump.
+fn collatz(n: Int, steps: Int) : Int =
+  if n == 1 { steps }
+  else if n % 2 == 0 { collatz(n / 2, steps + 1) }
+  else { collatz(3 * n + 1, steps + 1) }
+
+fn scan(i: Int, limit: Int, best: Int, best_n: Int) : (Int, Int) =
+  if i >= limit { (best, best_n) }
+  else {
+    let s = collatz(i, 0)
+    if s > best { scan(i + 1, limit, s, i) }
+    else { scan(i + 1, limit, best, best_n) }
+  }
+
+fn parse_limit(a: [String]) : Int = match a {
+  [first, ..._] -> match string_to_int(first) { Some(n) -> n  None -> 1000000 }
+  []            -> 1000000
+}
+
+fn main() : Int / Stdout + Env = {
+  let limit = parse_limit(argv())
+  let r = scan(1, limit, 0, 0)
+  Stdout.print("longest under #{int_to_string(limit)}: n=#{int_to_string(r.snd)} steps=#{int_to_string(r.fst)}")
+  0
+}

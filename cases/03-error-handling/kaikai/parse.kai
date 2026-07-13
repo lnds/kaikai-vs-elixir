@@ -1,0 +1,26 @@
+effect Parse { bad(field: String, raw: String) : Nothing }
+
+# One fallible parse. `Parse.bad` returns Nothing, so it cannot resume:
+# it abandons the computation, exactly like an early {:error, _}.
+fn to_int(field: String, s: String) : Int / Parse = match string_to_int(s) {
+  Some(n) -> n
+  None    -> Parse.bad(field, s)
+}
+
+# The happy path is the whole function body: no per-call guard. The Parse
+# effect rides the row up to the handler, which discharges it once.
+fn sum3(a: String, b: String, c: String) : Int / Parse =
+  to_int("a", a) + to_int("b", b) + to_int("c", c)
+
+fn run(a: String, b: String, c: String) : Unit / Stdout = {
+  handle {
+    Stdout.print("sum=#{int_to_string(sum3(a, b, c))}")
+  } with Parse {
+    bad(field, raw, resume) -> Stdout.print("error: bad #{field}: #{raw}")
+  }
+}
+
+fn main() : Unit / Stdout = {
+  run("10", "20", "12")
+  run("10", "oops", "12")
+}

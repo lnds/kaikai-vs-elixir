@@ -1,0 +1,28 @@
+import actor
+import spawn
+
+# A hand-rolled supervisor: Link + trap_exit turns a linked child's death
+# into a mailbox message instead of a cascading cancel. The restart policy
+# is the code you write yourself — this is the primitive OTP is built from,
+# not the framework.
+fn worker(parent: Pid[String], n: Int) : Unit / Actor[String] + Link + Stdout = {
+  Link.link(parent)
+  Stdout.print("worker up, dividing 100 / #{int_to_string(n)}")
+  Stdout.print("result: #{int_to_string(100 / n)}")
+}
+
+fn run() : Unit / Actor[String] + Spawn + Stdout + Link = {
+  spawn.set_trap_exit(true)
+  let me = Actor.self()
+  let _ = spawn.spawn(() => with_mailbox { worker(me, 0) })
+  let exit1 = Actor.receive()
+  Stdout.print("supervisor saw: #{exit1} -> restarting")
+  let _ = spawn.spawn(() => with_mailbox { worker(me, 5) })
+  let exit2 = Actor.receive()
+  Stdout.print("supervisor saw: #{exit2} -> done")
+}
+
+fn main() : Int / Stdout + Spawn + Link = {
+  with_mailbox { run() }
+  0
+}

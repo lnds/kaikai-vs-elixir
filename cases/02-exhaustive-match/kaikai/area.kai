@@ -1,0 +1,15 @@
+type Shape = Circle(Real) | Square(Real) | Triangle(Real, Real)
+
+# Every constructor is handled. The checker verifies exhaustiveness over
+# Shape, so this compiles precisely because no variant is missing.
+fn area(s: Shape) : Real = match s {
+  Circle(r)        -> 3.14159 * r * r
+  Square(side)     -> side * side
+  Triangle(b, h)   -> 0.5 * b * h
+}
+
+fn main() : Unit / Stdout = {
+  Stdout.print("circle:   #{real_to_string(area(Circle(3.0)))}")
+  Stdout.print("square:   #{real_to_string(area(Square(3.0)))}")
+  Stdout.print("triangle: #{real_to_string(area(Triangle(3.0, 4.0)))}")
+}

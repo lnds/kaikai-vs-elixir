@@ -1,0 +1,16 @@
+effect Parse { bad(field: String, raw: String) : Nothing }
+
+fn to_int(field: String, s: String) : Int / Parse = match string_to_int(s) {
+  Some(n) -> n
+  None    -> Parse.bad(field, s)
+}
+
+fn sum3(a: String, b: String, c: String) : Int / Parse =
+  to_int("a", a) + to_int("b", b) + to_int("c", c)
+
+# The forgetful caller: uses sum3 as if it could not fail. No handler,
+# no Parse in main's row. This does NOT compile — the effect row makes
+# "this can fail" part of the type, so forgetting it cannot ship.
+fn main() : Unit / Stdout = {
+  Stdout.print("sum=#{int_to_string(sum3("10", "oops", "12"))}")
+}
