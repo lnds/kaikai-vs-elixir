@@ -136,8 +136,10 @@ elixir elixir/supervised.exs          # crash logged, restart, exit 0
 kai build kaikai/crash_nursery.kai -o /tmp/cn && /tmp/cn; echo $?   # no survivors, 1
 kai build kaikai/supervise.kai -o /tmp/sv && /tmp/sv; echo $?       # trapped + restart, 0
 cd kaikai-ahu && kai install && kai run .   # ahu: 3 restarts + escalation, 0
-# (kai.toml points at a local ../kaikailang-org/ahu checkout; the git dep
-#  form did not resolve on kai 0.99.6 — `kai install` locked 0 entries)
+# (the dep is git-pinned: ahu = { source = "https://github.com/kaikailang-org/ahu",
+#  ref = "v0.2.0" }. Note the manifest syntax: `kai info packages` documents a
+#  `{ git = ..., tag = ... }` form that kai 0.99.6 silently ignores — resolves
+#  "1 dependency", locks 0 entries, no error. `source`/`ref` is what works.)
 ```
 
 ## Where kaikai wins / the trade-off

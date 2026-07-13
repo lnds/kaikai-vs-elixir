@@ -4,4 +4,4 @@ edition = "hanga-roa"
 entry = "main.kai"
 
 [dependencies]
-ahu = { path = "../../../../../kaikailang-org/ahu" }
+ahu = { source = "https://github.com/kaikailang-org/ahu", ref = "v0.2.0" }

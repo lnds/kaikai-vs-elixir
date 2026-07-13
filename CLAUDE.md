@@ -81,9 +81,13 @@ publishes).
 - **ahu (kaikailang-org/ahu, v0.2.0) is kaikai's fault-tolerance framework**
   — cells (typed GenServer shape) + restart helpers (`Permanent | Transient
   | Temporary`, `Limit(n)`, `with_restart_backoff`, escalation via Cancel;
-  nesting composes). Case 4's `kaikai-ahu/` package runs it. Dep resolution:
-  the **git dep form silently locked 0 entries on kai 0.99.6** — use a
-  `path` dep to a local checkout (`kai install` then `kai run .`).
+  nesting composes). Case 4's `kaikai-ahu/` package runs it, git-pinned:
+  `ahu = { source = "https://github.com/kaikailang-org/ahu", ref =
+  "v0.2.0" }` (`kai install` then `kai run .`). TRAP: `kai info packages`
+  documents `{ git = ..., tag = ... }`, which kai 0.99.6 **silently
+  ignores** (resolves "1 dependency", locks 0 entries, no error) —
+  `source`/`ref` is the real syntax (what `kai add <url>@<ref>` writes).
+  Docs-vs-impl bug in kaikai, unfiled (file only on explicit request).
 - **BUG FOUND (unfiled — file only on explicit request): ahu `Transient`
   does not restart on real faults.** `restart_loop` matches the trap-exit
   reason against `"Crashed"`, but genuine faults arrive as `"Trapped:
