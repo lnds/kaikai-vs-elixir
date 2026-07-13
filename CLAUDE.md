@@ -88,8 +88,9 @@ publishes).
   ignores** (resolves "1 dependency", locks 0 entries, no error) —
   `source`/`ref` is the real syntax (what `kai add <url>@<ref>` writes).
   Docs-vs-impl bug in kaikai, unfiled (file only on explicit request).
-- **BUG FOUND (unfiled — file only on explicit request): ahu `Transient`
-  does not restart on real faults.** `restart_loop` matches the trap-exit
+- **BUG FOUND, filed on request as ahu#34
+  (github.com/kaikailang-org/ahu/issues/34): ahu `Transient` does not
+  restart on real faults.** `restart_loop` matches the trap-exit
   reason against `"Crashed"`, but genuine faults arrive as `"Trapped:
   <msg>"` (e.g. `"Trapped: divide by zero"`), so Transient treats them as
   normal exits and gives up; only `Cancel.raise()` (→ `"Crashed"`) triggers

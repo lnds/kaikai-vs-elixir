@@ -112,13 +112,15 @@ demo above is no longer "framework vs no framework".
 
 The honest edges, found by running it:
 
-- **Bug (upstream, found here): `Transient` does not restart on a real
-  fault.** ahu's restart loop matches the trap-exit reason against the
-  string `"Crashed"`, but a genuine fault arrives as `"Trapped: divide by
-  zero"` — so `Transient`, whose entire purpose is "restart only on crash",
-  treats a real crash as a normal exit and returns. Verified both ways: the
-  same body with `Cancel.raise()` restarts 3× and escalates; with `10 / 0`
-  it is silently final. `Permanent` is unaffected (restarts on any reason).
+- **Bug (upstream, found here, filed as
+  [ahu#34](https://github.com/kaikailang-org/ahu/issues/34)): `Transient`
+  does not restart on a real fault.** ahu's restart loop matches the
+  trap-exit reason against the string `"Crashed"`, but a genuine fault
+  arrives as `"Trapped: divide by zero"` — so `Transient`, whose entire
+  purpose is "restart only on crash", treats a real crash as a normal exit
+  and returns. Verified both ways: the same body with `Cancel.raise()`
+  restarts 3× and escalates; with `10 / 0` it is silently final.
+  `Permanent` is unaffected (restarts on any reason).
 - **A cell crash mid-driver is unobserved** — documented in ahu itself: the
   trap-exit channel is typed `String` and the body's mailbox is typed `Msg`,
   so only the *driver* fiber's death reaches the supervisor; a cell that
