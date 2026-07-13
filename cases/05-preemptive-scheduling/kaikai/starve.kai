@@ -1,27 +1,32 @@
 import spawn
+import time
 
-# A pure CPU loop: no I/O, no yield points. Under a cooperative
-# scheduler nothing else runs until it finishes.
-fn hog(i: Int, limit: Int) : Int =
-  if i >= limit { i } else { hog(i + 1, limit) }
+# A fold-proof CPU hog: Collatz steps are data-dependent, so LLVM
+# cannot reduce the loop to a closed form (a bare counter loop it can —
+# and did, in an earlier draft of this case).
+fn collatz(n: Int, steps: Int) : Int =
+  if n == 1 { steps }
+  else if n % 2 == 0 { collatz(n / 2, steps + 1) }
+  else { collatz(3 * n + 1, steps + 1) }
 
-fn heartbeat(k: Int) : Unit / Stdout =
+fn hog(i: Int, limit: Int, acc: Int) : Int =
+  if i >= limit { acc } else { hog(i + 1, limit, acc + collatz(i, 0)) }
+
+fn heartbeat(k: Int) : Unit / Stdout + Clock =
   if k == 0 { () }
   else {
     Stdout.print("heartbeat #{int_to_string(k)}")
+    sleep(millis(50))
     heartbeat(k - 1)
   }
 
-fn main() : Int / Spawn + Stdout = {
+fn main() : Int / Spawn + Stdout + Clock = {
   nursery { n ->
-    let h = n.spawn(() => {
-      let r = hog(0, 300000000)
-      Stdout.print("hog done: #{int_to_string(r)}")
-      ()
-    })
+    let h = n.spawn(() => hog(1, 3000000, 0))
     let b = n.spawn(() => heartbeat(3))
-    n.await(h)
+    let r = n.await(h)
     n.await(b)
+    Stdout.print("hog done: acc=#{int_to_string(r)}")
   }
   0
 }

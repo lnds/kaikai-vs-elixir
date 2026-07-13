@@ -21,7 +21,9 @@ publishes).
 - `discarded/` — candidate claims refuted by running them, documented not
   deleted. Contains the struct-typo claim the 1.19 checker killed.
 - Verified against **Elixir 1.19.5 / OTP 28** (JIT, 14 schedulers, asdf) and
-  **kaikai 0.99.6** (native backend). 14-core machine (matters for case 6).
+  **kaikai 0.99.11** (native backend); first built on 0.99.6, re-verified
+  after 0.99.11 shipped M:N threading and **moved cases 5 and 6** (history
+  in those READMEs). 14-core machine (matters for cases 5–6).
 
 ### Case status (who wins)
 
@@ -31,8 +33,8 @@ publishes).
 | 2 | exhaustive-match | kaikai (safety) — tagged tuples + @type/@spec: elixirc silent, runtime CaseClauseError (loud+named, credited); dialyzer flags the call site (opt-in, needs PLT + elixir ebin on code path); kaikai names the missing variant at build |
 | 3 | error-handling | kaikai (safety; ergonomics a wash) — `with` is genuinely good; forgetting `{:error,_}` compiles + MatchError; kaikai unhandled effect row = compile error |
 | 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug (below) |
-| 5 | preemptive-scheduling | **Elixir** — kaikai CPU-hog fiber starves siblings (cooperative, no preemption); BEAM interleaves even with `+S 1` (reductions). Honest note: kaikai loop can salt `spawn.yield()` manually |
-| 6 | runtime-perf | **split** — Collatz N=5M: kaikai serial 0.58 s/1.7 MB; kaikai 8 fibers 0.58 s (zero speedup); Elixir serial 2.05 s/97 MB; Elixir 14 shards **0.44 s wall** (beats kaikai serial even paying ~0.22 s BEAM boot). Same answer everywhere: n=3732423 steps=596 |
+| 5 | preemptive-scheduling | **Elixir** (survived 0.99.11 threads) — default: first heartbeat only after the full 338 ms crunch. `KAI_THREADS=2`: ready fiber stolen at 10 ms, BUT the beat waking from `sleep(millis(50))` parks BEHIND the hog until ~340 ms — reproduced at `=4` with idle workers (wake-path re-enqueue not stolen). BEAM: all beats on 50 ms cadence even `+S 1`. Parallelism ≠ preemption |
+| 6 | runtime-perf | **split, moved twice by 0.99.11** — Collatz N=5M: kaikai serial 0.52 s; 8 fibers default 0.53 s; 8 fibers `KAI_THREADS=8` **0.10 s** (beats Elixir 14-shard 0.44 s ~4.4×); Elixir serial 2.05 s. BUT 0.99.11 RSS: **169.5 MB fixed** at any N/thread-count-1 (vs 1.7 MB on 0.99.6), 757.7 MB at 8 threads → BEAM (97 MB) now wins memory. Same answer everywhere: n=3732423 steps=596 |
 
 ## Elixir facts that bit / matter here
 
@@ -87,7 +89,7 @@ publishes).
   documents `{ git = ..., tag = ... }`, which kai 0.99.6 **silently
   ignores** (resolves "1 dependency", locks 0 entries, no error) —
   `source`/`ref` is the real syntax (what `kai add <url>@<ref>` writes).
-  Docs-vs-impl bug in kaikai, unfiled (file only on explicit request).
+  Filed on request as kaikai#1215 (repros on 0.99.6 and 0.99.11).
 - **BUG FOUND, filed on request as ahu#34
   (github.com/kaikailang-org/ahu/issues/34): ahu `Transient` does not
   restart on real faults.** `restart_loop` matches the trap-exit
@@ -101,10 +103,28 @@ publishes).
   Also documented in ahu itself: a cell crash mid-driver is UNOBSERVED
   (String vs Msg mailbox typing) — driver stalls; and there is no process
   registry, so callers restart with the unit (unlike OTP `name:`).
-- **No preemption** (documented in `kai info fibers`): cancellation lands at
-  the next yield point; a pure-CPU fiber starves siblings (case 5, ~0.5 s).
-- **Fibers ≠ parallelism**: 8-fiber Collatz is byte-identical wall-clock to
-  serial (0.58 s). Do not claim any multi-core story for kaikai.
+- **M:N scheduler since 0.99.11** (`KAI_THREADS=N`, opt-in, default 1;
+  commit 9a525a2f, part of #1207): per-thread work-stealing deques,
+  copy-on-cross-thread mailbox send (non-atomic Perceus RC survives via
+  physical copy; same-thread send keeps pointer transfer). NOT yet in
+  `kai info fibers`. 8-fiber Collatz: 0.53 s → **0.10 s** at
+  `KAI_THREADS=8`.
+- **No preemption at any thread count** (docs still explicit): case 5
+  measured — default starves the heartbeat for the full crunch;
+  with threads, work-stealing rescues *ready* fibers (10 ms) but a fiber
+  waking from `Clock.sleep` re-enqueues on the wake path and parks behind
+  a CPU hog even with idle workers (stable at `=2` and `=4`). CANDIDATE
+  UPSTREAM ISSUE (unfiled): wake-path re-enqueue is not work-stolen.
+- **0.99.11 RSS regression (unfiled candidate issue): the M:N runtime
+  pre-reserves ~169.5 MB resident** regardless of workload (N=1000, ANY
+  KAI_THREADS incl. 1) and ~+84 MB/extra thread (758 MB at 8). Not a leak
+  (`KAI_TRACE_RC` clean, leaked=7). 0.99.6 same program: 1.7 MB. The
+  commit's "default byte-identical to pre-M:N" holds for semantics, not
+  footprint. This flipped case 6's memory verdict to the BEAM.
+- **LLVM folds pure counter loops** (`fn hog(i,limit) = if i>=limit ...`
+  → closed form) in `--release`: a starvation demo with a counter hog
+  measures nothing. Case 5's hog is a Collatz scan (data-dependent) for
+  exactly this reason. Verify hogs actually burn CPU before timing them.
 - Hot loops: tail recursion with accumulator (the `while`+`var` 65× trap is
   documented in ../kaikai-vs-golang, not re-run here).
 - `kai build` errors exit 0 through a grep pipe — check `pipestatus[1]`/run
