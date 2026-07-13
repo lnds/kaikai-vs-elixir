@@ -1,0 +1,61 @@
+# The ahu column of case 4: the same real fault (division by zero) under
+# ahu's declarative supervision. A counter cell + a driver that computes
+# 100 / (count - 3) — zero on every fresh run, so the driver fiber dies
+# on a real ArithmeticError-shaped fault, not a polite Cancel.raise().
+#
+# Permanent + Limit(3): three restarts (state resets to 0 each time,
+# so the output repeats "cell at 3"), then the intensity budget
+# exhausts and escalation fires through the outer Cancel handler.
+
+import spawn
+import actor
+import ahu.cell
+import ahu.restart
+import ahu.app
+
+type CounterMsg = Tick | GetCount(Pid[CounterMsg]) | Count(Int)
+
+fn counter_step(value: Int, msg: CounterMsg)
+  : StepResult[Int] / Actor[CounterMsg] + Console + Cancel
+= match msg {
+    Tick            -> cell.keep(value + 1)
+    GetCount(reply) -> {
+      Actor.send(reply, Count(value))
+      cell.keep(value)
+    }
+    Count(_)        -> cell.keep(value)
+  }
+
+fn fragile_driver(pid: Pid[CounterMsg])
+  : Unit / Actor[CounterMsg] + Console + Cancel
+= {
+  let me = Actor.self()
+  Actor.send(pid, Tick)
+  Actor.send(pid, Tick)
+  Actor.send(pid, Tick)
+  Actor.send(pid, GetCount(me))
+  match Actor.receive() {
+    Count(n) -> {
+      Stdout.print("driver: cell at " ++ int_to_string(n) ++ " — dividing 100 by " ++ int_to_string(n - 3))
+      Stdout.print("driver: got " ++ int_to_string(100 / (n - 3)))
+    }
+    Tick        -> Stdout.print("driver: unexpected Tick")
+    GetCount(_) -> Stdout.print("driver: unexpected GetCount")
+  }
+}
+
+fn root() : Unit / Spawn + Link + Cancel + Console = {
+  Stdout.print("supervisor: Permanent, Limit(3), fault = real division by zero")
+  with_mailbox {
+    handle {
+      restart.restartable_cell(Permanent, Limit(3), 0, counter_step, fragile_driver)
+    } with Cancel {
+      raise(resume) -> Stdout.print("supervisor: intensity exhausted, escalating")
+    }
+  }
+}
+
+fn main() : Int / Spawn + Cancel + Console + Link + Signal = {
+  app.run_app(root)
+  0
+}

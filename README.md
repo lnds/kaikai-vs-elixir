@@ -48,7 +48,7 @@ built for.
 | 1 | [typing-holes](cases/01-typing-holes/) | kaikai (safety) | A typo'd field is a compile **warning** at best (exit 0, the `.beam` ships), a silent `nil` via `Access`, and a **compile error** in kaikai. Full credit to the impressive 1.19 checker, which killed this repo's strong version of the claim ([`discarded/`](discarded/struct-typo-unchecked/)). |
 | 2 | [exhaustive-match](cases/02-exhaustive-match/) | kaikai (safety) | Tagged tuples + `@type` are a convention: add `:triangle` and the old `case` compiles clean, crashing at runtime (`CaseClauseError` — loud and named, credit given; Dialyzer can flag the call site, opt-in). kaikai's `match` fails the build naming the missing variant. |
 | 3 | [error-handling](cases/03-error-handling/) | kaikai (safety; ergonomics a wash) | `with` chains beautifully — stated plainly. But `{:ok, _} = ...` that forgets the error path compiles and `MatchError`s at runtime; kaikai's unhandled effect row does not compile. |
-| 4 | [fault-tolerance](cases/04-fault-tolerance/) | **Elixir** | A crashed worker under a one-line `Supervisor` restarts and the app never stops. kaikai's nursery default is fail-fast (program exits); a `Link`+`trap_exit` supervisor **can** be hand-rolled (shown working!) — the framework, defaults, and 25 years of burn-in are what kaikai lacks. |
+| 4 | [fault-tolerance](cases/04-fault-tolerance/) | **Elixir** | A crashed worker under a one-line `Supervisor` restarts and the app never stops. kaikai's nursery default is fail-fast; a `Link`+`trap_exit` supervisor hand-rolls fine, and the **ahu** framework runs the same real fault under `Permanent`+`Limit(3)` with escalation (shown working!). Elixir keeps the win on registry, defaults, maturity — running ahu here found a real bug in its `Transient` policy, which *is* the maturity gap, measured. |
 | 5 | [preemptive-scheduling](cases/05-preemptive-scheduling/) | **Elixir** | A pure-CPU fiber starves its siblings in kaikai (cooperative, no preemption — ~0.5 s of silence here). The BEAM preempts on reductions: heartbeats interleave even on a single scheduler (`+S 1`). Latency under load is a BEAM *guarantee*. |
 | 6 | [runtime-perf](cases/06-runtime-perf/) | **split** | Collatz N=5M: kaikai native serial **0.58 s / 1.7 MB** vs Elixir serial 2.05 s / 97 MB (~3.5× / ~58×). But Elixir's 14 schedulers deliver **0.44 s wall** — beating kaikai serial even paying BEAM boot — while kaikai's 8 fibers add exactly nothing (0.58 s). Cores vs cycles, measured. |
 
@@ -76,9 +76,14 @@ gap; each is architecture kaikai does not have today:
 - **Preemption.** Reduction-based descheduling is why case 5's heartbeat
   never starves. kaikai's cancellation is cooperative and its scheduler
   never preempts.
-- **Supervision as a framework.** Restart strategies, intensity limits,
-  supervision trees, `DynamicSupervisor` — kaikai has the primitives
-  (monitor/link/trap-exit) and none of the framework.
+- **Supervision as a *mature* framework.** kaikai has the primitives
+  (monitor/link/trap-exit) and a young framework
+  ([ahu](https://github.com/kaikailang-org/ahu): policies, intensity,
+  backoff, escalation — run in case 4). What it has no form for yet: a
+  process registry (named workers whose callers outlive restarts),
+  `DynamicSupervisor`, per-fiber crash observation inside a cell scope —
+  and OTP's decades of burn-in (case 4 found an ahu `Transient` bug by
+  running it once).
 - **Hot code upgrades.** Deploy new code into a running node without
   dropping state or connections. kaikai is an ahead-of-time binary; the
   concept does not map.
@@ -97,9 +102,10 @@ gap; each is architecture kaikai does not have today:
 Elixir's bet is the **runtime**: put every fault behind a process boundary,
 preempt everything, restart what dies, use all the cores, and let a small
 dynamic language ride on top — now with a type checker growing underneath it.
-This repo measures that bet paying off exactly where it was placed: cases 4
-and 5 are not close, and case 6's wall-clock goes to the BEAM on any
-multi-core box.
+This repo measures that bet paying off exactly where it was placed: case 5
+is not close, case 4 stays Elixir's on maturity and defaults (though ahu
+narrows it to a contest between frameworks, not framework-vs-nothing), and
+case 6's wall-clock goes to the BEAM on any multi-core box.
 
 kaikai's bet is the **compiler**: make the bug classes that OTP so gracefully
 *survives* — typos, missing cases, forgotten error paths — unrepresentable

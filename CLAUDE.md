@@ -30,7 +30,7 @@ publishes).
 | 1 | typing-holes | kaikai (safety) — struct/dot typos: 1.19 **warns** (exit 0, .beam ships); `cfg[:typo]` Access: silent nil; kaikai: compile error w/ did-you-mean. Bonus finding: a crashing .exs dies before its buffered warning prints |
 | 2 | exhaustive-match | kaikai (safety) — tagged tuples + @type/@spec: elixirc silent, runtime CaseClauseError (loud+named, credited); dialyzer flags the call site (opt-in, needs PLT + elixir ebin on code path); kaikai names the missing variant at build |
 | 3 | error-handling | kaikai (safety; ergonomics a wash) — `with` is genuinely good; forgetting `{:error,_}` compiles + MatchError; kaikai unhandled effect row = compile error |
-| 4 | fault-tolerance | **Elixir** — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; BUT Link+trap_exit hand-rolled supervisor WORKS (div-by-zero arrives as "Trapped: divide by zero" in the mailbox) — the gap is the framework/defaults, not the primitive |
+| 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug (below) |
 | 5 | preemptive-scheduling | **Elixir** — kaikai CPU-hog fiber starves siblings (cooperative, no preemption); BEAM interleaves even with `+S 1` (reductions). Honest note: kaikai loop can salt `spawn.yield()` manually |
 | 6 | runtime-perf | **split** — Collatz N=5M: kaikai serial 0.58 s/1.7 MB; kaikai 8 fibers 0.58 s (zero speedup); Elixir serial 2.05 s/97 MB; Elixir 14 shards **0.44 s wall** (beats kaikai serial even paying ~0.22 s BEAM boot). Same answer everywhere: n=3732423 steps=596 |
 
@@ -78,6 +78,24 @@ publishes).
   supervision framework/strategies — that's Elixir's win, stated as such.
 - **Nursery default is fail-fast**: a child fault cancels siblings, program
   prints `kai: nursery child cancelled; no survivors`, exit 1.
+- **ahu (kaikailang-org/ahu, v0.2.0) is kaikai's fault-tolerance framework**
+  — cells (typed GenServer shape) + restart helpers (`Permanent | Transient
+  | Temporary`, `Limit(n)`, `with_restart_backoff`, escalation via Cancel;
+  nesting composes). Case 4's `kaikai-ahu/` package runs it. Dep resolution:
+  the **git dep form silently locked 0 entries on kai 0.99.6** — use a
+  `path` dep to a local checkout (`kai install` then `kai run .`).
+- **BUG FOUND (unfiled — file only on explicit request): ahu `Transient`
+  does not restart on real faults.** `restart_loop` matches the trap-exit
+  reason against `"Crashed"`, but genuine faults arrive as `"Trapped:
+  <msg>"` (e.g. `"Trapped: divide by zero"`), so Transient treats them as
+  normal exits and gives up; only `Cancel.raise()` (→ `"Crashed"`) triggers
+  Transient restarts. Verified both directions in scratch; `Permanent`
+  unaffected (restarts on any reason). Root ambiguity: docs/actors.md's
+  trap-exit table documents only `"Normal"`/`"Crashed"` payloads, so either
+  the kaikai runtime drifted or ahu never learned the `"Trapped:"` prefix.
+  Also documented in ahu itself: a cell crash mid-driver is UNOBSERVED
+  (String vs Msg mailbox typing) — driver stalls; and there is no process
+  registry, so callers restart with the unit (unlike OTP `name:`).
 - **No preemption** (documented in `kai info fibers`): cancellation lands at
   the next yield point; a pure-CPU fiber starves siblings (case 5, ~0.5 s).
 - **Fibers ≠ parallelism**: 8-fiber Collatz is byte-identical wall-clock to

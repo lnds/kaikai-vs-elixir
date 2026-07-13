@@ -1,11 +1,15 @@
 # Case 4 — supervision: a framework vs primitives
 
-**Category C — Elixir wins.** This is OTP's home turf, and the honest result
-is not the strawman "kaikai dies on any crash". kaikai has the actual
-primitives (links, trap-exit, monitors) and a hand-rolled restart works —
-proven below. What it does not have is the *framework*: declarative restart
-strategies, intensity limits, supervision trees, and crash isolation as the
-default posture of the whole runtime.
+**Category C — Elixir wins, by less than the first draft of this case
+claimed.** This is OTP's home turf, and the honest result is not the strawman
+"kaikai dies on any crash". kaikai has the primitives (links, trap-exit,
+monitors) and a hand-rolled restart works — proven below. And kaikai has a
+young framework layer too: [**ahu**](https://github.com/kaikailang-org/ahu)
+ships declarative restart policies, intensity budgets, backoff, and
+escalation — run against the same real fault below, where it both works and
+yields this case's upstream-bug find. What Elixir keeps: OTP's registry
+(callers outside the restart unit), its defaults, the preemptive runtime
+underneath, and twenty-five years of burn-in.
 
 ## The claim
 
@@ -74,13 +78,56 @@ supervisor saw: Normal -> done
 ```
 
 Exit 0. So the primitive layer is genuinely there — this is Erlang's
-`process_flag(trap_exit, true)` pattern, working. Everything above that
-layer is on you: this demo's "policy" is one hard-coded respawn. Restart
-intensity, back-off, ordering (`rest_for_one`), dynamic children, tree
-composition — each would be user code, and each is code OTP users have not
-written since 1998. (`Monitor` exists too, for observation without linking;
-`unlink` does not exist yet, and mailbox-based supervision of *typed* actors
-couples the supervisor's message type to a `MonitorDown` variant.)
+`process_flag(trap_exit, true)` pattern, working. (`Monitor` exists too, for
+observation without linking; `unlink` does not exist yet, and mailbox-based
+supervision of *typed* actors couples the supervisor's message type to a
+`MonitorDown` variant.)
+
+## kaikai + ahu — the framework column
+
+Elixir never arrives without OTP, so fairness demands kaikai's framework
+layer be run too. [ahu](https://github.com/kaikailang-org/ahu) (v0.2.0) is
+kaikai's concurrency/fault-tolerance package — *cells* (typed stateful
+message loops, the GenServer shape) plus *restart helpers* (`Permanent |
+Transient | Temporary`, `Limit(n)` intensity, fixed backoff, escalation via
+`Cancel` so nested supervisors compose). It is explicit that it is "not an
+OTP clone".
+
+[`kaikai-ahu/main.kai`](kaikai-ahu/main.kai) — the same real fault (a
+division by zero, in the driver) under `restartable_cell(Permanent,
+Limit(3), ...)`:
+
+```text
+supervisor: Permanent, Limit(3), fault = real division by zero
+driver: cell at 3 — dividing 100 by 0
+driver: cell at 3 — dividing 100 by 0
+driver: cell at 3 — dividing 100 by 0
+supervisor: intensity exhausted, escalating
+```
+
+Exit 0. Declarative policy, restarts with state reset (the cell reads 3
+every cycle, never 6), an intensity budget, and clean escalation — the OTP
+pattern, in a typed language, working against a genuine fault. The Elixir
+demo above is no longer "framework vs no framework".
+
+The honest edges, found by running it:
+
+- **Bug (upstream, found here): `Transient` does not restart on a real
+  fault.** ahu's restart loop matches the trap-exit reason against the
+  string `"Crashed"`, but a genuine fault arrives as `"Trapped: divide by
+  zero"` — so `Transient`, whose entire purpose is "restart only on crash",
+  treats a real crash as a normal exit and returns. Verified both ways: the
+  same body with `Cancel.raise()` restarts 3× and escalates; with `10 / 0`
+  it is silently final. `Permanent` is unaffected (restarts on any reason).
+- **A cell crash mid-driver is unobserved** — documented in ahu itself: the
+  trap-exit channel is typed `String` and the body's mailbox is typed `Msg`,
+  so only the *driver* fiber's death reaches the supervisor; a cell that
+  dies leaves the driver stalled on a receive. The restart unit is the
+  cell+driver scope, not each fiber.
+- **No registry.** OTP's `name: __MODULE__` is what let the Elixir demo's
+  *caller* live outside the supervision tree and keep calling across
+  restarts. ahu pids are lexically scoped; callers live inside the restart
+  unit and restart with it.
 
 ## Reproduce
 
@@ -88,6 +135,9 @@ couples the supervisor's message type to a `MonitorDown` variant.)
 elixir elixir/supervised.exs          # crash logged, restart, exit 0
 kai build kaikai/crash_nursery.kai -o /tmp/cn && /tmp/cn; echo $?   # no survivors, 1
 kai build kaikai/supervise.kai -o /tmp/sv && /tmp/sv; echo $?       # trapped + restart, 0
+cd kaikai-ahu && kai install && kai run .   # ahu: 3 restarts + escalation, 0
+# (kai.toml points at a local ../kaikailang-org/ahu checkout; the git dep
+#  form did not resolve on kai 0.99.6 — `kai install` locked 0 entries)
 ```
 
 ## Where kaikai wins / the trade-off
@@ -104,6 +154,9 @@ kai build kaikai/supervise.kai -o /tmp/sv && /tmp/sv; echo $?       # trapped + 
 - **The trade-off stated plainly:** when the fault is environmental (network
   peer dies, disk fills, NIF misbehaves) no type system prevents it, and
   that is where "isolate, log, restart, escalate" as a zero-user-code
-  default is untouchable. Elixir wins this case on the framework, the
-  default, and twenty-five years of production burn-in — not on the
-  primitive, which kaikai has.
+  default is untouchable. Elixir wins this case on the registry, the
+  defaults, the preemptive runtime under the supervisor, and twenty-five
+  years of burn-in — not on the primitive (which kaikai has) and no longer
+  on the mere existence of a framework (ahu ships one; it is young, and
+  this case found one of its bugs by running it — which is itself the
+  maturity gap, measured).
