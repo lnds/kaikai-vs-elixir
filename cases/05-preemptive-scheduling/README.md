@@ -47,11 +47,19 @@ ready heartbeat is stolen by the idle worker immediately (real
 parallelism), but after its 50 ms sleep it wakes on the reactor path and
 parks behind the hog until ~337 ms — while the other worker sits idle.
 At 4 threads the waking beat does get picked up (this changed between
-0.99.11 and 0.100.0 — at 0.99.11, `=4` parked exactly like `=2`). So the
-wake-path gap is closing release by release, but what closes it is spare
-workers, not a latency guarantee: the `=2` column shows the scheduler
-still has no mechanism that bounds how long a waking fiber waits behind a
-hog.
+0.99.11 and 0.100.0 — at 0.99.11, `=4` parked exactly like `=2`). But
+that is placement luck, not a fix: with **four** hogs and `KAI_THREADS=8`
+(4 workers idle), the woken beat parks again until ~335 ms, and with 4
+hogs saturating `=4` the first beat waits **858 ms** — worse than the
+1-thread column. Two further measurements complete the picture, filed
+upstream with their repros: the wake-path re-enqueue is not stealable by
+idle workers ([kai#1267](https://github.com/lnds/kaikai/issues/1267)),
+and `Spawn.cancel` on a pure-CPU fiber never lands at all — requested at
+9 ms, the fiber runs its remaining ~310 ms and the nursery blocks on it
+([kai#1268](https://github.com/lnds/kaikai/issues/1268)). The proposed
+fix for the guarantee itself — a BEAM-style reduction budget as
+compiler-inserted safepoints — is
+[kai#1269](https://github.com/lnds/kaikai/issues/1269).
 
 [`elixir/starve.exs`](elixir/starve.exs) (first ~0.2–0.4 s is BEAM boot +
 script compile; what matters is beats-vs-hog ordering):
@@ -93,9 +101,10 @@ elixir --erl "+S 1" elixir/starve.exs  | perl -MTime::HiRes=time -ne "$TS"
   right trade.
 - **M:N is young and moving fast — measurably.** Work-stealing rescued the
   ready-fiber case at 0.99.11; between 0.99.11 and 0.100.0 the waking-fiber
-  case at `=4` went from parked to on-cadence. The remaining `=2` gap is
-  the kind of scheduler follow-up that ships in a point release — re-run
-  this case on every upgrade (its numbers have moved on each one so far).
+  case at `=4` went from parked to on-cadence. The remaining gaps are now
+  filed with repros (kai#1267 fairness, kai#1268 cancellation, kai#1269
+  the reduction-budget proposal) — re-run this case on every upgrade (its
+  numbers have moved on each one so far).
 - **The mitigation is real but manual:** salt hot loops with
   `spawn.yield()` — discipline where the BEAM has a guarantee, which is
   the symmetric mirror of cases 1–3 (Elixir's discipline vs kaikai's

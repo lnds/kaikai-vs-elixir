@@ -110,10 +110,15 @@ publishes).
   measured — default starves the heartbeat for the full crunch; with
   threads, work-stealing rescues *ready* fibers (~0 ms) but a fiber waking
   from `Clock.sleep` re-enqueues on the wake path and parks behind a CPU
-  hog at `=2` with a worker idle (stable ×3). CHANGED at 0.100.0: `=4` now
-  lands all beats on cadence (0/49/99 ms, stable ×3) — on 0.99.11 it
-  parked like `=2`. CANDIDATE UPSTREAM ISSUE (unfiled, narrowed):
-  wake-path re-enqueue is not work-stolen at `=2`.
+  hog. NOT thread-count-specific: parks at `=2` (1 worker idle) AND at
+  4 hogs + `=8` (4 workers idle); 1 hog + `=4` lands on cadence at
+  0.100.0 (parked on 0.99.11) — placement luck, not a fix. Saturation:
+  4 hogs + `=4` → first beat 858 ms. Also measured: `Spawn.cancel` on a
+  pure-CPU fiber never lands (requested at 9 ms, fiber runs its full
+  ~310 ms, nursery exit blocks). FILED: kai#1267 (wake-path fairness),
+  kai#1268 (cancel unbounded), kai#1269 (proposal: BEAM-style reduction
+  budget via compiler safepoints — asu-reviewed design). NB the real
+  tracker is **lnds/kaikai**; kaikailang-org/kaikai is a publish mirror.
 - **The 0.99.11 RSS regression (~169.5 MB fixed, ~758 MB at 8 threads) was
   FIXED upstream in 0.99.12** ("lazy-materialise the RC free-list pools",
   closes #1212/#1213 — shipped the same day as the regression; our
