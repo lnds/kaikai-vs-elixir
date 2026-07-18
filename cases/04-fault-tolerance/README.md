@@ -7,7 +7,8 @@ monitors) and a hand-rolled restart works — proven below. And kaikai has a
 young framework layer too: [**ahu**](https://github.com/kaikailang-org/ahu)
 ships declarative restart policies, intensity budgets, backoff, and
 escalation — run against the same real fault below, where it both works and
-yields this case's upstream-bug find. What Elixir keeps: OTP's registry
+yielded this case's upstream-bug find (filed as ahu#34, **fixed upstream in
+v0.2.1**, fix re-verified below). What Elixir keeps: OTP's registry
 (callers outside the restart unit), its defaults, the preemptive runtime
 underneath, and twenty-five years of burn-in.
 
@@ -86,7 +87,7 @@ supervision of *typed* actors couples the supervisor's message type to a
 ## kaikai + ahu — the framework column
 
 Elixir never arrives without OTP, so fairness demands kaikai's framework
-layer be run too. [ahu](https://github.com/kaikailang-org/ahu) (v0.2.0) is
+layer be run too. [ahu](https://github.com/kaikailang-org/ahu) (v0.2.1) is
 kaikai's concurrency/fault-tolerance package — *cells* (typed stateful
 message loops, the GenServer shape) plus *restart helpers* (`Permanent |
 Transient | Temporary`, `Limit(n)` intensity, fixed backoff, escalation via
@@ -113,14 +114,16 @@ demo above is no longer "framework vs no framework".
 The honest edges, found by running it:
 
 - **Bug (upstream, found here, filed as
-  [ahu#34](https://github.com/kaikailang-org/ahu/issues/34)): `Transient`
-  does not restart on a real fault.** ahu's restart loop matches the
-  trap-exit reason against the string `"Crashed"`, but a genuine fault
-  arrives as `"Trapped: divide by zero"` — so `Transient`, whose entire
-  purpose is "restart only on crash", treats a real crash as a normal exit
-  and returns. Verified both ways: the same body with `Cancel.raise()`
-  restarts 3× and escalates; with `10 / 0` it is silently final.
-  `Permanent` is unaffected (restarts on any reason).
+  [ahu#34](https://github.com/kaikailang-org/ahu/issues/34), fixed in
+  v0.2.1): `Transient` did not restart on a real fault.** ahu's restart
+  loop matched the trap-exit reason against the string `"Crashed"`, but a
+  genuine fault arrives as `"Trapped: divide by zero"` — so `Transient`,
+  whose entire purpose is "restart only on crash", treated a real crash as
+  a normal exit and returned. The v0.2.1 fix adds an `is_crash` predicate
+  covering both abnormal shapes; re-verified here both ways on the pinned
+  v0.2.1: this case's division-by-zero under `Transient` now restarts 3×
+  and escalates (same output as the `Permanent` run above), and a clean
+  exit still runs once with no restart.
 - **A cell crash mid-driver is unobserved** — documented in ahu itself: the
   trap-exit channel is typed `String` and the body's mailbox is typed `Msg`,
   so only the *driver* fiber's death reaches the supervisor; a cell that
@@ -139,9 +142,10 @@ kai build kaikai/crash_nursery.kai -o /tmp/cn && /tmp/cn; echo $?   # no survivo
 kai build kaikai/supervise.kai -o /tmp/sv && /tmp/sv; echo $?       # trapped + restart, 0
 cd kaikai-ahu && kai install && kai run .   # ahu: 3 restarts + escalation, 0
 # (the dep is git-pinned: ahu = { source = "https://github.com/kaikailang-org/ahu",
-#  ref = "v0.2.0" }. Note the manifest syntax: `kai info packages` documents a
-#  `{ git = ..., tag = ... }` form that kai 0.99.6 silently ignores — resolves
-#  "1 dependency", locks 0 entries, no error. `source`/`ref` is what works.)
+#  ref = "v0.2.1" }. History: kai 0.99.6 silently ignored the documented
+#  `{ git = ..., tag = ... }` form — resolved "1 dependency", locked 0
+#  entries, no error (filed as kaikai#1215). Fixed in 0.99.13: both
+#  spellings now resolve, and unknown forms error loudly.)
 ```
 
 ## Where kaikai wins / the trade-off
@@ -162,5 +166,6 @@ cd kaikai-ahu && kai install && kai run .   # ahu: 3 restarts + escalation, 0
   defaults, the preemptive runtime under the supervisor, and twenty-five
   years of burn-in — not on the primitive (which kaikai has) and no longer
   on the mere existence of a framework (ahu ships one; it is young, and
-  this case found one of its bugs by running it — which is itself the
-  maturity gap, measured).
+  this case found a policy-inverting bug in it by running it once — which
+  is the maturity gap, measured. The bug was fixed upstream in v0.2.1 and
+  the fix is re-verified here; the gap is youth, not neglect).

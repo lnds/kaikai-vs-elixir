@@ -21,9 +21,11 @@ publishes).
 - `discarded/` — candidate claims refuted by running them, documented not
   deleted. Contains the struct-typo claim the 1.19 checker killed.
 - Verified against **Elixir 1.19.5 / OTP 28** (JIT, 14 schedulers, asdf) and
-  **kaikai 0.99.11** (native backend); first built on 0.99.6, re-verified
-  after 0.99.11 shipped M:N threading and **moved cases 5 and 6** (history
-  in those READMEs). 14-core machine (matters for cases 5–6).
+  **kaikai 0.100.0** (native backend, self-hosted stage 2); first built on
+  0.99.6, re-verified on 0.99.11 (M:N threading **moved cases 5 and 6**) and
+  again on 0.100.0 (RSS regression fixed → case 6 memory back to kaikai;
+  case 5's `=4` parking gone; ahu#34 fixed in v0.2.1 — history in those
+  READMEs). 14-core machine (matters for cases 5–6).
 
 ### Case status (who wins)
 
@@ -32,9 +34,9 @@ publishes).
 | 1 | typing-holes | kaikai (safety) — struct/dot typos: 1.19 **warns** (exit 0, .beam ships); `cfg[:typo]` Access: silent nil; kaikai: compile error w/ did-you-mean. Bonus finding: a crashing .exs dies before its buffered warning prints |
 | 2 | exhaustive-match | kaikai (safety) — tagged tuples + @type/@spec: elixirc silent, runtime CaseClauseError (loud+named, credited); dialyzer flags the call site (opt-in, needs PLT + elixir ebin on code path); kaikai names the missing variant at build |
 | 3 | error-handling | kaikai (safety; ergonomics a wash) — `with` is genuinely good; forgetting `{:error,_}` compiles + MatchError; kaikai unhandled effect row = compile error |
-| 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug (below) |
-| 5 | preemptive-scheduling | **Elixir** (survived 0.99.11 threads) — default: first heartbeat only after the full 338 ms crunch. `KAI_THREADS=2`: ready fiber stolen at 10 ms, BUT the beat waking from `sleep(millis(50))` parks BEHIND the hog until ~340 ms — reproduced at `=4` with idle workers (wake-path re-enqueue not stolen). BEAM: all beats on 50 ms cadence even `+S 1`. Parallelism ≠ preemption |
-| 6 | runtime-perf | **split, moved twice by 0.99.11** — Collatz N=5M: kaikai serial 0.52 s; 8 fibers default 0.53 s; 8 fibers `KAI_THREADS=8` **0.10 s** (beats Elixir 14-shard 0.44 s ~4.4×); Elixir serial 2.05 s. BUT 0.99.11 RSS: **169.5 MB fixed** at any N/thread-count-1 (vs 1.7 MB on 0.99.6), 757.7 MB at 8 threads → BEAM (97 MB) now wins memory. Same answer everywhere: n=3732423 steps=596 |
+| 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug — filed as ahu#34, **fixed upstream in v0.2.1**, fix re-verified both directions (below) |
+| 5 | preemptive-scheduling | **Elixir** (survived threads; re-verified 0.100.0) — default: first heartbeat only after the full ~330 ms crunch. `KAI_THREADS=2`: ready fiber stolen at ~0 ms, BUT the beat waking from `sleep(millis(50))` parks BEHIND the hog until ~337 ms with a worker idle. `=4` NOW lands on cadence (0/49/99 — changed between 0.99.11 and 0.100.0; on 0.99.11 it parked like `=2`). BEAM: all beats on 50 ms cadence even `+S 1`. Parallelism ≠ preemption |
+| 6 | runtime-perf | **kaikai, moved three times** — 0.100.0 Collatz N=5M: serial 0.57 s (drifted from 0.52 on 0.99.11); 8 fibers default 0.58 s; `KAI_THREADS=8` **0.08 s** (beats Elixir 14-shard 0.43 s ~5×); Elixir serial 2.03 s. RSS: **2.6 MB at 8 threads** — the 0.99.11 ~169.5 MB/757.7 MB reservation was fixed upstream in 0.99.12 (lazy RC free-list pools), so memory is kaikai's again (BEAM 97 MB). Same answer everywhere: n=3732423 steps=596 |
 
 ## Elixir facts that bit / matter here
 
@@ -80,47 +82,45 @@ publishes).
   supervision framework/strategies — that's Elixir's win, stated as such.
 - **Nursery default is fail-fast**: a child fault cancels siblings, program
   prints `kai: nursery child cancelled; no survivors`, exit 1.
-- **ahu (kaikailang-org/ahu, v0.2.0) is kaikai's fault-tolerance framework**
+- **ahu (kaikailang-org/ahu, v0.2.1) is kaikai's fault-tolerance framework**
   — cells (typed GenServer shape) + restart helpers (`Permanent | Transient
   | Temporary`, `Limit(n)`, `with_restart_backoff`, escalation via Cancel;
   nesting composes). Case 4's `kaikai-ahu/` package runs it, git-pinned:
   `ahu = { source = "https://github.com/kaikailang-org/ahu", ref =
-  "v0.2.0" }` (`kai install` then `kai run .`). TRAP: `kai info packages`
-  documents `{ git = ..., tag = ... }`, which kai 0.99.6 **silently
-  ignores** (resolves "1 dependency", locks 0 entries, no error) —
-  `source`/`ref` is the real syntax (what `kai add <url>@<ref>` writes).
-  Filed on request as kaikai#1215 (repros on 0.99.6 and 0.99.11).
-- **BUG FOUND, filed on request as ahu#34
-  (github.com/kaikailang-org/ahu/issues/34): ahu `Transient` does not
-  restart on real faults.** `restart_loop` matches the trap-exit
-  reason against `"Crashed"`, but genuine faults arrive as `"Trapped:
-  <msg>"` (e.g. `"Trapped: divide by zero"`), so Transient treats them as
-  normal exits and gives up; only `Cancel.raise()` (→ `"Crashed"`) triggers
-  Transient restarts. Verified both directions in scratch; `Permanent`
-  unaffected (restarts on any reason). Root ambiguity: docs/actors.md's
-  trap-exit table documents only `"Normal"`/`"Crashed"` payloads, so either
-  the kaikai runtime drifted or ahu never learned the `"Trapped:"` prefix.
-  Also documented in ahu itself: a cell crash mid-driver is UNOBSERVED
+  "v0.2.1" }` (`kai install` then `kai run .`). The old TRAP — kai 0.99.6
+  silently ignored the documented `{ git = ..., tag = ... }` form (filed as
+  kaikai#1215) — was FIXED in 0.99.13: both spellings resolve, unknown
+  forms error loudly (verified on 0.100.0).
+- **ahu#34 (Transient never restarted on real faults) is FIXED in v0.2.1**
+  (commit 1bff4435): `restart_loop` matched the trap-exit reason against
+  `"Crashed"` only, but genuine faults arrive as `"Trapped: <msg>"`; the
+  fix adds a shared `is_crash` predicate covering both. Re-verified on the
+  pin both directions: real 10/0 under Transient+Limit(3) → 3 restarts +
+  escalation, exit 0; clean exit → single run, no restart. `Permanent`
+  unchanged. Still true in ahu: a cell crash mid-driver is UNOBSERVED
   (String vs Msg mailbox typing) — driver stalls; and there is no process
   registry, so callers restart with the unit (unlike OTP `name:`).
 - **M:N scheduler since 0.99.11** (`KAI_THREADS=N`, opt-in, default 1;
   commit 9a525a2f, part of #1207): per-thread work-stealing deques,
   copy-on-cross-thread mailbox send (non-atomic Perceus RC survives via
-  physical copy; same-thread send keeps pointer transfer). NOT yet in
-  `kai info fibers`. 8-fiber Collatz: 0.53 s → **0.10 s** at
+  physical copy; same-thread send keeps pointer transfer). STILL not in
+  `kai info fibers` at 0.100.0. 8-fiber Collatz: 0.58 s → **0.08 s** at
   `KAI_THREADS=8`.
 - **No preemption at any thread count** (docs still explicit): case 5
-  measured — default starves the heartbeat for the full crunch;
-  with threads, work-stealing rescues *ready* fibers (10 ms) but a fiber
-  waking from `Clock.sleep` re-enqueues on the wake path and parks behind
-  a CPU hog even with idle workers (stable at `=2` and `=4`). CANDIDATE
-  UPSTREAM ISSUE (unfiled): wake-path re-enqueue is not work-stolen.
-- **0.99.11 RSS regression (unfiled candidate issue): the M:N runtime
-  pre-reserves ~169.5 MB resident** regardless of workload (N=1000, ANY
-  KAI_THREADS incl. 1) and ~+84 MB/extra thread (758 MB at 8). Not a leak
-  (`KAI_TRACE_RC` clean, leaked=7). 0.99.6 same program: 1.7 MB. The
-  commit's "default byte-identical to pre-M:N" holds for semantics, not
-  footprint. This flipped case 6's memory verdict to the BEAM.
+  measured — default starves the heartbeat for the full crunch; with
+  threads, work-stealing rescues *ready* fibers (~0 ms) but a fiber waking
+  from `Clock.sleep` re-enqueues on the wake path and parks behind a CPU
+  hog at `=2` with a worker idle (stable ×3). CHANGED at 0.100.0: `=4` now
+  lands all beats on cadence (0/49/99 ms, stable ×3) — on 0.99.11 it
+  parked like `=2`. CANDIDATE UPSTREAM ISSUE (unfiled, narrowed):
+  wake-path re-enqueue is not work-stolen at `=2`.
+- **The 0.99.11 RSS regression (~169.5 MB fixed, ~758 MB at 8 threads) was
+  FIXED upstream in 0.99.12** ("lazy-materialise the RC free-list pools",
+  closes #1212/#1213 — shipped the same day as the regression; our
+  candidate issue was never needed). Verified on 0.100.0: N=1000 serial
+  1.77 MB, `KAI_THREADS=8` 2.6 MB.
+  Case 6's memory verdict is back to kaikai. Perf drift noted honestly:
+  serial N=5M 0.52 s (0.99.11) → 0.57 s (0.100.0).
 - **LLVM folds pure counter loops** (`fn hog(i,limit) = if i>=limit ...`
   → closed form) in `--release`: a starvation demo with a counter hog
   measures nothing. Case 5's hog is a Collatz scan (data-dependent) for

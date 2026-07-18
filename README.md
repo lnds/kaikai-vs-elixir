@@ -21,11 +21,16 @@ built for.
 ## Disclaimer / methodology
 
 - **Verified with `Elixir 1.19.5 (compiled with Erlang/OTP 28)` (JIT, 14
-  schedulers) and `kaikai 0.99.11` (hanga-roa, stage 2)**, native backend;
-  nothing here is backend-sensitive. First built against kaikai 0.99.6;
-  0.99.11 shipped an M:N work-stealing scheduler (`KAI_THREADS`, opt-in)
-  mid-comparison and **moved cases 5 and 6** — both re-measured, history
-  kept in each case. Cases 1–4 and beyond-elixir re-verified unchanged.
+  schedulers) and `kaikai 0.100.0` (hanga-roa, stage 2, self-hosted)**,
+  native backend; nothing here is backend-sensitive. First built against
+  kaikai 0.99.6; 0.99.11 shipped an M:N work-stealing scheduler
+  (`KAI_THREADS`, opt-in) mid-comparison and **moved cases 5 and 6**;
+  0.100.0 moved them again — the 0.99.11 memory regression was fixed
+  upstream (0.99.12) flipping case 6's memory verdict back, and case 5's
+  wake-path parking no longer reproduces at `KAI_THREADS=4` (still does at
+  `=2`). The ahu `Transient` bug this repo found and filed (ahu#34) was
+  fixed upstream in v0.2.1 and the fix is re-verified in case 4. History
+  kept in each case; cases 1–3 and beyond-elixir re-verified unchanged.
 - Every Elixir "this compiles but misbehaves" claim is backed by the actual
   `elixirc` output (including its 1.19 type-checker warnings, when any) and
   the actual runtime error. **No strawmen**: the Elixir shown is the version
@@ -51,9 +56,9 @@ built for.
 | 1 | [typing-holes](cases/01-typing-holes/) | kaikai (safety) | A typo'd field is a compile **warning** at best (exit 0, the `.beam` ships), a silent `nil` via `Access`, and a **compile error** in kaikai. Full credit to the impressive 1.19 checker, which killed this repo's strong version of the claim ([`discarded/`](discarded/struct-typo-unchecked/)). |
 | 2 | [exhaustive-match](cases/02-exhaustive-match/) | kaikai (safety) | Tagged tuples + `@type` are a convention: add `:triangle` and the old `case` compiles clean, crashing at runtime (`CaseClauseError` — loud and named, credit given; Dialyzer can flag the call site, opt-in). kaikai's `match` fails the build naming the missing variant. |
 | 3 | [error-handling](cases/03-error-handling/) | kaikai (safety; ergonomics a wash) | `with` chains beautifully — stated plainly. But `{:ok, _} = ...` that forgets the error path compiles and `MatchError`s at runtime; kaikai's unhandled effect row does not compile. |
-| 4 | [fault-tolerance](cases/04-fault-tolerance/) | **Elixir** | A crashed worker under a one-line `Supervisor` restarts and the app never stops. kaikai's nursery default is fail-fast; a `Link`+`trap_exit` supervisor hand-rolls fine, and the **ahu** framework runs the same real fault under `Permanent`+`Limit(3)` with escalation (shown working!). Elixir keeps the win on registry, defaults, maturity — running ahu here found a real bug in its `Transient` policy, which *is* the maturity gap, measured. |
-| 5 | [preemptive-scheduling](cases/05-preemptive-scheduling/) | **Elixir** | A pure-CPU fiber starves siblings in kaikai's default (timestamped: first heartbeat after the full 338 ms crunch). 0.99.11's `KAI_THREADS=2` lets work-stealing rescue the *ready* fiber (10 ms) — but the beat waking from `sleep` parks **behind the hog** even with idle workers. The BEAM preempts on reductions: every beat on time, even `+S 1`. Parallelism ≠ preemption. |
-| 6 | [runtime-perf](cases/06-runtime-perf/) | **split** (moved twice in one release) | Collatz N=5M: kaikai serial 0.52 s (~3.5× the BEAM JIT). On 0.99.6 fibers added zero cores and Elixir's 14 schedulers won the wall (0.44 s); on 0.99.11 `KAI_THREADS=8` runs the same fiber binary in **0.10 s** — kaikai takes the wall — while the new runtime's fixed **~169 MB** reservation (vs 1.7 MB on 0.99.6) hands Elixir (97 MB) the memory story it had lost 58× over. |
+| 4 | [fault-tolerance](cases/04-fault-tolerance/) | **Elixir** | A crashed worker under a one-line `Supervisor` restarts and the app never stops. kaikai's nursery default is fail-fast; a `Link`+`trap_exit` supervisor hand-rolls fine, and the **ahu** framework runs the same real fault under `Permanent`+`Limit(3)` with escalation (shown working!). Elixir keeps the win on registry, defaults, maturity — running ahu here found a policy-inverting `Transient` bug (filed as ahu#34, fixed upstream in v0.2.1, fix re-verified), which *is* the maturity gap, measured. |
+| 5 | [preemptive-scheduling](cases/05-preemptive-scheduling/) | **Elixir** | A pure-CPU fiber starves siblings in kaikai's default (timestamped: first heartbeat only after the full ~330 ms crunch). `KAI_THREADS=2` lets work-stealing rescue the *ready* fiber (~0 ms) — but the beat waking from `sleep` parks **behind the hog** with a worker idle; `=4` lands on cadence since 0.100.0, by spare threads, not by guarantee. The BEAM preempts on reductions: every beat on time, even `+S 1`. Parallelism ≠ preemption. |
+| 6 | [runtime-perf](cases/06-runtime-perf/) | **kaikai** (moved three times in three releases) | Collatz N=5M: kaikai serial 0.57 s (~3.6× the BEAM JIT); `KAI_THREADS=8` runs the same fiber binary in **0.08 s** vs Elixir's 14-shard 0.43 s — at **2.6 MB** RSS vs the BEAM's 97 MB. The 0.99.11 release had briefly ceded memory to the BEAM (~169 MB reservation); it was a bug, fixed upstream in 0.99.12, re-measured here. |
 
 ### Beyond Elixir — kaikai-only features
 
@@ -74,13 +79,15 @@ Symmetry demands this list, and it is not short. None of these is a library
 gap; each is architecture kaikai does not have today:
 
 - **Multi-core scheduling *by default*.** The BEAM's schedulers are always
-  on; as of 0.99.11 kaikai has real M:N work-stealing too, but opt-in
-  (`KAI_THREADS`, default 1, undocumented in `kai info fibers` so far) —
-  measured in case 6, where it now wins the wall.
+  on; since 0.99.11 kaikai has real M:N work-stealing too, but opt-in
+  (`KAI_THREADS`, default 1, still undocumented in `kai info fibers` at
+  0.100.0) — measured in case 6, where it wins the wall.
 - **Preemption.** Reduction-based descheduling is why case 5's heartbeat
   never starves. kaikai's scheduler never preempts at any thread count —
-  0.99.11's threads rescue ready fibers via stealing, but a fiber waking
-  from sleep still parks behind a CPU hog (case 5, measured).
+  threads rescue ready fibers via stealing, but a fiber waking from sleep
+  still parks behind a CPU hog at `KAI_THREADS=2` with a worker idle
+  (case 5, measured; `=4` escapes since 0.100.0 — spare workers, not a
+  guarantee).
 - **Supervision as a *mature* framework.** kaikai has the primitives
   (monitor/link/trap-exit) and a young framework
   ([ahu](https://github.com/kaikailang-org/ahu): policies, intensity,
@@ -112,22 +119,24 @@ is not close (and survived kaikai's new threads — parallelism is not
 preemption), case 4 stays Elixir's on maturity and defaults (though ahu
 narrows it to a contest between frameworks, not framework-vs-nothing).
 Case 6's wall-clock went to the BEAM at 0.99.6 and to kaikai at 0.99.11 —
-while the same release ceded the memory floor to the BEAM. The compiler
-moving under the comparison, twice in one release, is the methodology
-working.
+and the memory floor, briefly ceded to the BEAM by a 0.99.11 regression,
+came back at 0.100.0 after an upstream fix. The ground moving under the
+comparison on every release — including two upstream bugs this repo found,
+filed, and saw fixed — is the methodology working.
 
 kaikai's bet is the **compiler**: make the bug classes that OTP so gracefully
 *survives* — typos, missing cases, forgotten error paths — unrepresentable
 before the program exists, compile to native code with megabytes-not-
-hundred-megabytes of footprint, and pay for it by (today) owning one core
-per program and no supervision framework.
+hundred-megabytes of footprint, and pay for it by (today) offering
+parallelism as an opt-in env var, preemption not at all, and supervision as
+a young framework rather than a twenty-five-year default.
 
 The sharpest sentence in the repo: **Elixir is engineered to survive at
 runtime what kaikai is engineered to prevent at compile time** — and each
 side's showcase case (4 vs 1–3) is the other side's admitted gap. Where
 they compete head-on (case 6), native codegen wins the core, work-stealing
-now wins the machine, and — as of 0.99.11 — the BEAM wins the memory
-floor.
+wins the machine, and — since 0.100.0 — the memory floor is kaikai's
+again.
 
 ## How to re-verify everything
 
