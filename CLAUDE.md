@@ -5,8 +5,8 @@ claim is proven by compiling/running code, never asserted. Sibling of
 `../kaikai-vs-rust` and `../kaikai-vs-golang`, same methodology, different
 target: Elixir's space is the BEAM — preemptive processes, multi-core
 schedulers, supervision/fault-tolerance, dynamic language acquiring a
-gradual type checker. Local-only git (no remote, no push — the owner
-publishes).
+gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
+— push only when the owner asks; the owner decides when it goes public.
 
 ## What this repo is
 
@@ -173,7 +173,8 @@ publishes).
 ## Conventions
 
 - Commits: Conventional, English, no Claude attribution.
-- **Local only** — never `git push` or `gh repo create`. The owner publishes.
+- **Private remote** (github.com/lnds/kaikai-vs-elixir) — push only on the
+  owner's explicit ask; never change visibility. The owner publishes.
 - READMEs in English (the comparison is for a skeptical Elixir audience).
 - Honesty rule: if the idiomatic Elixir does the right thing — or the 1.19
   checker catches it — the claim is false → `discarded/` (two entries:
