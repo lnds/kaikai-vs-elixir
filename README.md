@@ -55,6 +55,22 @@ built for.
   the BEAM actually guarantees. And unlike the Go sibling, Elixir gets a
   dedicated honesty section below for the things **kaikai has no form for**.
 
+## Verdicts at a glance
+
+| # | Case | Winner | Why |
+|---|------|--------|-----|
+| 1 | typing-holes | **kaikai** (safety) | A field typo is at best a 1.19 **warning** in Elixir (exit 0, the `.beam` ships) and a silent `nil` via `Access`; in kaikai it is a compile error with did-you-mean. |
+| 2 | exhaustive-match | **kaikai** (safety) | Adding a variant compiles clean in Elixir and crashes at runtime with `CaseClauseError` (Dialyzer catches it, but opt-in); kaikai fails the build naming the missing variant. |
+| 3 | error-handling | **kaikai** (safety; ergonomics a wash) | `with` chains beautifully, but a forgotten `{:error, _}` path compiles and `MatchError`s at runtime; an unhandled effect row in kaikai does not compile. |
+| 4 | fault-tolerance | **Elixir** (narrowed) | A one-line `Supervisor` restarts the crashed worker and the app never stops. kaikai's primitives work and ahu runs the same real fault with restarts + escalation — but Elixir keeps the registry, the defaults, and 25 years of burn-in. |
+| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, with a retraction) | What survives is the *guarantee*: under saturation kaikai's heartbeat waits out a hog (~420 ms) and `Spawn.cancel` on pure-CPU never lands; the BEAM holds cadence under any load, even `+S 1`. With spare workers kaikai is already on cadence — the old "parking" claim was this repo's own measurement artifact, [conceded](discarded/wake-path-parking/). |
+| 6 | runtime-perf | **kaikai** (now by default) | 0.08 s vs the BEAM's parallel 0.49 s (~6×) with zero configuration since 0.104 (threads = ncpu); serial ~3.4× the JIT; ~12 MB RSS vs 92 MB (~1/8th). Stated drift: serial 0.52 → 0.63 s over three releases. |
+
+The pattern: 4–2 by case count, but each side wins exactly where it placed
+its bet — kaikai where the compiler can make bugs **unrepresentable** (1–3)
+and cycles into wall-clock (6); Elixir where the runtime **guarantees**
+behavior when things fail or saturate (4–5).
+
 ## Index
 
 | # | Case | Who wins | Claim (one line) |
