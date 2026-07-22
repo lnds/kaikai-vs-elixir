@@ -17,6 +17,10 @@ defmodule Starve do
   end
 
   def main do
+    # Timestamp anchor: BEAM boot + script compile must not be read as
+    # scheduling latency — t0 is this line, not process exec.
+    IO.puts("start")
+
     t1 =
       Task.async(fn ->
         acc = hog(1, 3_000_000, 0)

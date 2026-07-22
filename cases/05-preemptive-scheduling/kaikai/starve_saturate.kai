@@ -1,0 +1,33 @@
+import spawn
+import time
+
+# Saturation probe: more CPU-bound fibers than worker threads. The default
+# thread count is the host core count, so 16 hogs oversubscribe a 14-core
+# machine without touching KAI_THREADS.
+fn collatz(n: Int, steps: Int) : Int =
+  if n == 1 { steps }
+  else if n % 2 == 0 { collatz(n / 2, steps + 1) }
+  else { collatz(3 * n + 1, steps + 1) }
+
+fn hog(i: Int, limit: Int, acc: Int) : Int =
+  if i >= limit { acc } else { hog(i + 1, limit, acc + collatz(i, 0)) }
+
+fn heartbeat(k: Int) : Unit / Stdout + Clock =
+  if k == 0 { () }
+  else {
+    Stdout.print("heartbeat #{int_to_string(k)}")
+    sleep(millis(50))
+    heartbeat(k - 1)
+  }
+
+fn main() : Int / Spawn + Stdout + Clock = {
+  Stdout.print("start")
+  nursery { n ->
+    let hogs = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16] | (i => n.spawn(() => hog(1, 3000000, 0)))
+    let b = n.spawn(() => heartbeat(3))
+    let rs = hogs | (h => n.await(h))
+    n.await(b)
+    Stdout.print("hogs done")
+  }
+  0
+}

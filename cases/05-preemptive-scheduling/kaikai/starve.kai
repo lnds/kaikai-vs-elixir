@@ -21,6 +21,9 @@ fn heartbeat(k: Int) : Unit / Stdout + Clock =
   }
 
 fn main() : Int / Spawn + Stdout + Clock = {
+  # Timestamp anchor: cold-start (~250-350 ms to first print on macOS) must
+  # not be read as scheduling latency — t0 is this line, not process exec.
+  Stdout.print("start")
   nursery { n ->
     let h = n.spawn(() => hog(1, 3000000, 0))
     let b = n.spawn(() => heartbeat(3))

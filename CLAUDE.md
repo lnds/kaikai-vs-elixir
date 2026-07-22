@@ -19,13 +19,16 @@ publishes).
   macros + the 1.19 checker give Elixir a form for a lot; property testing
   and test injection were excluded on that ground).
 - `discarded/` — candidate claims refuted by running them, documented not
-  deleted. Contains the struct-typo claim the 1.19 checker killed.
+  deleted. Two entries: the struct-typo claim the 1.19 checker killed, and
+  **wake-path-parking — this repo's own kaikai claim, refuted by upstream
+  and conceded** (see case 5 facts below).
 - Verified against **Elixir 1.19.5 / OTP 28** (JIT, 14 schedulers, asdf) and
-  **kaikai 0.100.0** (native backend, self-hosted stage 2); first built on
-  0.99.6, re-verified on 0.99.11 (M:N threading **moved cases 5 and 6**) and
-  again on 0.100.0 (RSS regression fixed → case 6 memory back to kaikai;
-  case 5's `=4` parking gone; ahu#34 fixed in v0.2.1 — history in those
-  READMEs). 14-core machine (matters for cases 5–6).
+  **kaikai 0.104.0** (native backend, self-hosted stage 2); first built on
+  0.99.6, re-verified on 0.99.11 (M:N threading **moved cases 5 and 6**),
+  0.100.0 (RSS regression fixed; ahu#34 fixed in v0.2.1), and 0.104.0
+  (**KAI_THREADS defaults to ncpu** → case 6 wins by default, case 5
+  narrowed + parking claim retracted — history in those READMEs). 14-core
+  machine (matters for cases 5–6).
 
 ### Case status (who wins)
 
@@ -35,8 +38,8 @@ publishes).
 | 2 | exhaustive-match | kaikai (safety) — tagged tuples + @type/@spec: elixirc silent, runtime CaseClauseError (loud+named, credited); dialyzer flags the call site (opt-in, needs PLT + elixir ebin on code path); kaikai names the missing variant at build |
 | 3 | error-handling | kaikai (safety; ergonomics a wash) — `with` is genuinely good; forgetting `{:error,_}` compiles + MatchError; kaikai unhandled effect row = compile error |
 | 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug — filed as ahu#34, **fixed upstream in v0.2.1**, fix re-verified both directions (below) |
-| 5 | preemptive-scheduling | **Elixir** (survived threads; re-verified 0.100.0) — default: first heartbeat only after the full ~330 ms crunch. `KAI_THREADS=2`: ready fiber stolen at ~0 ms, BUT the beat waking from `sleep(millis(50))` parks BEHIND the hog until ~337 ms with a worker idle. `=4` NOW lands on cadence (0/49/99 — changed between 0.99.11 and 0.100.0; on 0.99.11 it parked like `=2`). BEAM: all beats on 50 ms cadence even `+S 1`. Parallelism ≠ preemption |
-| 6 | runtime-perf | **kaikai, moved three times** — 0.100.0 Collatz N=5M: serial 0.57 s (drifted from 0.52 on 0.99.11); 8 fibers default 0.58 s; `KAI_THREADS=8` **0.08 s** (beats Elixir 14-shard 0.43 s ~5×); Elixir serial 2.03 s. RSS: **2.6 MB at 8 threads** — the 0.99.11 ~169.5 MB/757.7 MB reservation was fixed upstream in 0.99.12 (lazy RC free-list pools), so memory is kaikai's again (BEAM 97 MB). Same answer everywhere: n=3732423 steps=596 |
+| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, WITH A RETRACTION) — threads default-on: any spare worker → beats on 50 ms cadence (0/49/99 at `=2`, `=4`, default 14). The old "wake parks behind hog" claim (kai#1267) was OUR measurement artifact — conceded in `discarded/wake-path-parking/`. What survives for Elixir: `=1` starves (~340 ms), SATURATION (16 hogs ≥ 14 workers → first beat ~420 ms; hogs=workers → ~350 ms), and `Spawn.cancel` on pure-CPU never lands (req ~6 ms, fiber runs full ~340 ms). BEAM: cadence under any load even `+S 1` |
+| 6 | runtime-perf | **kaikai, now BY DEFAULT** — 0.104.0 Collatz N=5M: fibers default (14 threads) **0.08 s** (beats Elixir 14-shard 0.49 s ~6×); serial 0.63 s (drift 0.52→0.57→0.63 across releases, stated); Elixir serial 2.14 s. RSS: default worker pool costs ~11–12 MB (vs BEAM 92 MB); `KAI_THREADS=1` keeps the ~2 MB floor. Same answer everywhere: n=3732423 steps=596 |
 
 ## Elixir facts that bit / matter here
 
@@ -100,32 +103,38 @@ publishes).
   unchanged. Still true in ahu: a cell crash mid-driver is UNOBSERVED
   (String vs Msg mailbox typing) — driver stalls; and there is no process
   registry, so callers restart with the unit (unlike OTP `name:`).
-- **M:N scheduler since 0.99.11** (`KAI_THREADS=N`, opt-in, default 1;
-  commit 9a525a2f, part of #1207): per-thread work-stealing deques,
-  copy-on-cross-thread mailbox send (non-atomic Perceus RC survives via
-  physical copy; same-thread send keeps pointer transfer). STILL not in
-  `kai info fibers` at 0.100.0. 8-fiber Collatz: 0.58 s → **0.08 s** at
-  `KAI_THREADS=8`.
-- **No preemption at any thread count** (docs still explicit): case 5
-  measured — default starves the heartbeat for the full crunch; with
-  threads, work-stealing rescues *ready* fibers (~0 ms) but a fiber waking
-  from `Clock.sleep` re-enqueues on the wake path and parks behind a CPU
-  hog. NOT thread-count-specific: parks at `=2` (1 worker idle) AND at
-  4 hogs + `=8` (4 workers idle); 1 hog + `=4` lands on cadence at
-  0.100.0 (parked on 0.99.11) — placement luck, not a fix. Saturation:
-  4 hogs + `=4` → first beat 858 ms. Also measured: `Spawn.cancel` on a
-  pure-CPU fiber never lands (requested at 9 ms, fiber runs its full
-  ~310 ms, nursery exit blocks). FILED: kai#1267 (wake-path fairness),
-  kai#1268 (cancel unbounded), kai#1269 (proposal: BEAM-style reduction
-  budget via compiler safepoints — asu-reviewed design). NB the real
-  tracker is **lnds/kaikai**; kaikailang-org/kaikai is a publish mirror.
-- **The 0.99.11 RSS regression (~169.5 MB fixed, ~758 MB at 8 threads) was
-  FIXED upstream in 0.99.12** ("lazy-materialise the RC free-list pools",
-  closes #1212/#1213 — shipped the same day as the regression; our
-  candidate issue was never needed). Verified on 0.100.0: N=1000 serial
-  1.77 MB, `KAI_THREADS=8` 2.6 MB.
-  Case 6's memory verdict is back to kaikai. Perf drift noted honestly:
-  serial N=5M 0.52 s (0.99.11) → 0.57 s (0.100.0).
+- **M:N scheduler since 0.99.11, DEFAULT-ON since 0.104** (workers = host
+  cores, capped 32; #1332 closed #1207; commit 9a525a2f introduced it):
+  per-thread work-stealing deques, copy-on-cross-thread mailbox send
+  (non-atomic Perceus RC survives via physical copy; same-thread send
+  keeps pointer transfer). Now documented in `kai info fibers`.
+  `KAI_THREADS=1` is the byte-identical cooperative escape hatch — set it
+  to demo single-thread starvation. 8-fiber Collatz: **0.08 s** at
+  default(14) or `=8`.
+- **The wake-path-parking claim was OUR measurement artifact — RETRACTED**
+  (kai#1267 closed not-reproducible; upstream was right). The `[0/337/389]`
+  shape came from anchoring t0 at pipeline start: a cold kaikai binary
+  takes ~250–350 ms to first print on macOS (page faults + signature
+  validation). Proven against ourselves: the exact 0.100-built binary,
+  warm, holds cadence 6/6 at `=2` (and the 858 ms / 4-hog+`=8` figures
+  fell the same way). PROTOCOL NOW: the program prints `start`, timestamps
+  anchor there, discard cold runs — baked into case 5's harness. Full
+  forensics in `discarded/wake-path-parking/`. Bonus find: 0.100's runtime
+  hung once in ~12 saturated runs (real intermittent deadlock; 0.104 ships
+  global-quiescence detection #1403, no hang seen there).
+- **No preemption at any thread count** (docs still explicit) — what
+  actually survives on 0.104: `=1` starves for the full crunch; saturation
+  (runnable CPU fibers ≥ workers) makes the beat wait out a hog (16 hogs
+  on 14 default workers → first beat ~420 ms; case 5's
+  starve_saturate.kai); `Spawn.cancel` on a pure-CPU fiber never lands
+  (req ~6 ms, fiber runs full ~340 ms). kai#1268 was folded into
+  **kai#1269 (safepoint/reduction-budget proposal — still OPEN)**. NB the
+  real tracker is **lnds/kaikai**; kaikailang-org/kaikai is a publish
+  mirror.
+- **RSS: the default worker pool costs ~11–12 MB** (0.104, any workload
+  size); `KAI_THREADS=1` keeps the ~2 MB floor (N=1000: 2.4 MB). The
+  0.99.11 regression (~169.5 MB/~758 MB) stays fixed. Perf drift noted
+  honestly: serial N=5M 0.52 (0.99.11) → 0.57 (0.100) → 0.63 s (0.104).
 - **LLVM folds pure counter loops** (`fn hog(i,limit) = if i>=limit ...`
   → closed form) in `--release`: a starvation demo with a counter hog
   measures nothing. Case 5's hog is a Collatz scan (data-dependent) for
@@ -141,9 +150,13 @@ publishes).
   runs via `/usr/bin/time -l`, peak RSS from the same. N from argv, result
   printed. 14-core arm64 mac.
 - Elixir parallel = `Task.async_stream` over `1..limit//chunk` range starts,
-  `shards = System.schedulers_online()` (14). ~2.3 s CPU / 0.44 s wall.
-- BEAM RSS is ~97 MB regardless of serial/parallel — it's the VM floor, not
+  `shards = System.schedulers_online()` (14). ~0.49 s wall at last re-run.
+- BEAM RSS is ~92 MB regardless of serial/parallel — it's the VM floor, not
   the workload.
+- **Latency measurements (case 5): anchor t0 on a line the program itself
+  prints, and use warm binaries only** — pipeline-start t0 + cold binary
+  already produced one retracted claim. The parking signature, if hunting
+  one, is a >50 ms gap BETWEEN consecutive beats (immune to start offset).
 
 ## Environment gotchas
 
@@ -163,8 +176,9 @@ publishes).
 - **Local only** — never `git push` or `gh repo create`. The owner publishes.
 - READMEs in English (the comparison is for a skeptical Elixir audience).
 - Honesty rule: if the idiomatic Elixir does the right thing — or the 1.19
-  checker catches it — the claim is false → `discarded/` (one entry already:
-  struct typos). Every case keeps a "Where Elixir wins / trade-off" section,
+  checker catches it — the claim is false → `discarded/` (two entries:
+  struct typos, and our own wake-path-parking claim — the rule cuts both
+  ways). Every case keeps a "Where Elixir wins / trade-off" section,
   and the README carries a "what Elixir has that kaikai has no form for"
   list (multi-core, preemption, OTP, hot upgrades, distribution,
   introspection, binary matching, macros). Keep it that way.
