@@ -1,0 +1,33 @@
+import spawn
+import time
+
+# The nursery's own body runs on the entry fiber, which is pinned to the
+# process main thread. A `sleep` there wakes on time only when no CPU-bound
+# fiber landed on that same worker — a spawned fiber has no such tie and
+# always wakes on cadence. Run both and compare.
+fn collatz(n: Int, steps: Int) : Int =
+  if n == 1 { steps }
+  else if n % 2 == 0 { collatz(n / 2, steps + 1) }
+  else { collatz(3 * n + 1, steps + 1) }
+
+fn hog(i: Int, limit: Int, acc: Int) : Int =
+  if i >= limit { acc } else { hog(i + 1, limit, acc + collatz(i, 0)) }
+
+fn sleeper(tag: String) : Unit / Stdout + Clock = {
+  sleep(millis(5))
+  Stdout.print("#{tag} woke")
+  sleep(millis(50))
+  Stdout.print("#{tag} woke 2")
+}
+
+fn main() : Int / Spawn + Stdout + Clock = {
+  Stdout.print("start")
+  nursery { n ->
+    let h = n.spawn(() => hog(1, 3000000, 0))
+    let s = n.spawn(() => sleeper("child"))
+    n.await(s)
+    sleeper("parent")
+    n.await(h)
+  }
+  0
+}

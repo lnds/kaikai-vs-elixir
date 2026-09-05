@@ -23,12 +23,14 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
   **wake-path-parking — this repo's own kaikai claim, refuted by upstream
   and conceded** (see case 5 facts below).
 - Verified against **Elixir 1.19.5 / OTP 28** (JIT, 14 schedulers, asdf) and
-  **kaikai 0.104.0** (native backend, self-hosted stage 2); first built on
+  **kaikai 0.114.0** (native backend, self-hosted stage 2); first built on
   0.99.6, re-verified on 0.99.11 (M:N threading **moved cases 5 and 6**),
-  0.100.0 (RSS regression fixed; ahu#34 fixed in v0.2.1), and 0.104.0
+  0.100.0 (RSS regression fixed; ahu#34 fixed in v0.2.1), 0.104.0
   (**KAI_THREADS defaults to ncpu** → case 6 wins by default, case 5
-  narrowed + parking claim retracted — history in those READMEs). 14-core
-  machine (matters for cases 5–6).
+  narrowed + parking claim retracted), and 0.114.0 (**quiet release**: ten
+  releases of front-end work, no scheduler change; everything re-verified
+  identical bar case 6's serial wall drifting back 0.63 → 0.57 s — see
+  the 0.114 notes below). 14-core machine (matters for cases 5–6).
 
 ### Case status (who wins)
 
@@ -38,8 +40,8 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
 | 2 | exhaustive-match | kaikai (safety) — tagged tuples + @type/@spec: elixirc silent, runtime CaseClauseError (loud+named, credited); dialyzer flags the call site (opt-in, needs PLT + elixir ebin on code path); kaikai names the missing variant at build |
 | 3 | error-handling | kaikai (safety; ergonomics a wash) — `with` is genuinely good; forgetting `{:error,_}` compiles + MatchError; kaikai unhandled effect row = compile error |
 | 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug — filed as ahu#34, **fixed upstream in v0.2.1**, fix re-verified both directions (below) |
-| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, WITH A RETRACTION) — threads default-on: any spare worker → beats on 50 ms cadence (0/49/99 at `=2`, `=4`, default 14). The old "wake parks behind hog" claim (kai#1267) was OUR measurement artifact — conceded in `discarded/wake-path-parking/`. What survives for Elixir: `=1` starves (~340 ms), SATURATION (16 hogs ≥ 14 workers → first beat ~420 ms; hogs=workers → ~350 ms), and `Spawn.cancel` on pure-CPU never lands (req ~6 ms, fiber runs full ~340 ms). BEAM: cadence under any load even `+S 1` |
-| 6 | runtime-perf | **kaikai, now BY DEFAULT** — 0.104.0 Collatz N=5M: fibers default (14 threads) **0.08 s** (beats Elixir 14-shard 0.49 s ~6×); serial 0.63 s (drift 0.52→0.57→0.63 across releases, stated); Elixir serial 2.14 s. RSS: default worker pool costs ~11–12 MB (vs BEAM 92 MB); `KAI_THREADS=1` keeps the ~2 MB floor. Same answer everywhere: n=3732423 steps=596 |
+| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, WITH A RETRACTION) — threads default-on: any *spawned* fiber's beat on 50 ms cadence (0/49/99 at `=2`, `=4`, default 14). The old "wake parks behind hog" claim (kai#1267) was OUR measurement artifact — conceded in `discarded/wake-path-parking/`. What survives for Elixir: `=1` starves (~320 ms), SATURATION (16 hogs ≥ 14 workers → first beat ~430 ms), `Spawn.cancel` on pure-CPU never lands (fiber runs full ~330 ms), and NEW at 0.114: a sleep on the NURSERY BODY wakes ~335 ms late in ~4/5 runs (entry fiber pinned to main thread, kai#1556) while a spawned sleeper is 2/54 ms every time. kai#1269 (safepoint proposal) CLOSED not-planned → design position, not pending fix. BEAM: cadence under any load even `+S 1` |
+| 6 | runtime-perf | **kaikai, now BY DEFAULT** — 0.114.0 Collatz N=5M: fibers default (14 threads) **0.08 s** (beats Elixir 14-shard 0.43 s ~5×); serial 0.57 s (drift 0.52→0.57→0.63→0.57, stated); Elixir serial 1.95 s. RSS: default worker pool costs ~11–12 MB (vs BEAM 92 MB); `KAI_THREADS=1` keeps the ~2 MB floor. BEAM boot floor now ~0.16 s. Same answer everywhere: n=3732423 steps=596 |
 
 ## Elixir facts that bit / matter here
 
@@ -107,7 +109,10 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
   cores, capped 32; #1332 closed #1207; commit 9a525a2f introduced it):
   per-thread work-stealing deques, copy-on-cross-thread mailbox send
   (non-atomic Perceus RC survives via physical copy; same-thread send
-  keeps pointer transfer). Now documented in `kai info fibers`.
+  keeps pointer transfer). NB `kai info fibers` on 0.114 no longer
+  mentions M:N/work-stealing at all — it documents fibers, nursery and
+  cooperative cancellation only. Don't cite the doc for the threading
+  model; cite the release/changelog.
   `KAI_THREADS=1` is the byte-identical cooperative escape hatch — set it
   to demo single-thread starvation. 8-fiber Collatz: **0.08 s** at
   default(14) or `=8`.
@@ -127,14 +132,40 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
   (runnable CPU fibers ≥ workers) makes the beat wait out a hog (16 hogs
   on 14 default workers → first beat ~420 ms; case 5's
   starve_saturate.kai); `Spawn.cancel` on a pure-CPU fiber never lands
-  (req ~6 ms, fiber runs full ~340 ms). kai#1268 was folded into
-  **kai#1269 (safepoint/reduction-budget proposal — still OPEN)**. NB the
-  real tracker is **lnds/kaikai**; kaikailang-org/kaikai is a publish
-  mirror.
-- **RSS: the default worker pool costs ~11–12 MB** (0.104, any workload
-  size); `KAI_THREADS=1` keeps the ~2 MB floor (N=1000: 2.4 MB). The
+  (fiber runs its full ~330 ms). **kai#1269 (the safepoint/reduction-budget
+  proposal) is now CLOSED as not planned** — with kai#1268 (cancellation)
+  closed first as "a corollary that closes when #1269 ships", and #1269
+  then closed citing #1268 as "addressed directly". Neither shipped; the
+  probe still measures the original behaviour. The defensible part of the
+  close is upstream's last line: the cooperative-scheduler design position
+  is preserved deliberately. So frame this case as a DESIGN POSITION, not
+  a pending fix. NB the real tracker is **lnds/kaikai**;
+  kaikailang-org/kaikai is a publish mirror.
+- **The ENTRY FIBER IS PINNED to the process main thread (kai#1556), and it
+  costs latency** (found at 0.114, case 5's `wake_entry_fiber.kai`): a
+  `sleep` in the NURSERY BODY wakes ~335 ms late in ~4 of 5 warm runs with
+  one hog and 13 workers idle, because that fiber cannot migrate off the
+  worker the hog landed on; a SPAWNED sleeper is 2/54 ms every run in the
+  same program. It is a coin flip on hog placement, hence the variance.
+  This is NOT the retracted parking claim (that one alleged *spawned*
+  fibers park, off a cold binary) — it survives the corrected protocol.
+  Consequence for measurement: **put anything latency-sensitive in a
+  spawned fiber, never in the nursery body**, or you measure the pin. This
+  is exactly what made the old `[6ms] cancel requested` figure wrong — it
+  was the lucky 4-in-15 run reported as the rule.
+- **RSS: the default worker pool costs ~11–12 MB** (0.104+, any workload
+  size); `KAI_THREADS=1` keeps the ~2 MB floor (N=1000: 1.9 MB). The
   0.99.11 regression (~169.5 MB/~758 MB) stays fixed. Perf drift noted
-  honestly: serial N=5M 0.52 (0.99.11) → 0.57 (0.100) → 0.63 s (0.104).
+  honestly: serial N=5M 0.52 (0.99.11) → 0.57 (0.100) → 0.63 (0.104) →
+  0.57 s (0.114 — first time it moved back).
+- **0.105–0.114 was all front end**: symbol table + SymId identity, module
+  and namespace resolution (#1800/#1897 lanes), Perceus fixes, fmt. No
+  scheduler, effect-row or exhaustiveness change — which is why the whole
+  suite re-verified byte-for-byte. New at 0.114 and visible in this repo:
+  an **unused-import / unused-binding warning** (#1846) that now fires on
+  `starve_saturate.kai` (`rs`) and on ahu's `main.kai` (`import spawn`),
+  plus a **nursery brand-tracking warning** (#1550) from inside ahu's
+  `app.kai`. All warnings, exit 0; no output changed.
 - **LLVM folds pure counter loops** (`fn hog(i,limit) = if i>=limit ...`
   → closed form) in `--release`: a starvation demo with a counter hog
   measures nothing. Case 5's hog is a Collatz scan (data-dependent) for
@@ -150,13 +181,18 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
   runs via `/usr/bin/time -l`, peak RSS from the same. N from argv, result
   printed. 14-core arm64 mac.
 - Elixir parallel = `Task.async_stream` over `1..limit//chunk` range starts,
-  `shards = System.schedulers_online()` (14). ~0.49 s wall at last re-run.
+  `shards = System.schedulers_online()` (14). ~0.43 s wall at last re-run.
 - BEAM RSS is ~92 MB regardless of serial/parallel — it's the VM floor, not
   the workload.
 - **Latency measurements (case 5): anchor t0 on a line the program itself
   prints, and use warm binaries only** — pipeline-start t0 + cold binary
   already produced one retracted claim. The parking signature, if hunting
   one, is a >50 ms gap BETWEEN consecutive beats (immune to start offset).
+- **A latency number needs its VARIANCE, not its best run** — report N runs
+  or a range. The `[6ms] cancel requested` figure was a 4-in-15 outcome
+  quoted as the rule, and it hid the pinned-entry-fiber effect for a whole
+  release. Corollary from the same find: **the timed sleeper must be a
+  spawned fiber**; a sleep in the nursery body measures the pin.
 
 ## Environment gotchas
 

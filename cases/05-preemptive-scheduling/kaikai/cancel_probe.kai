@@ -1,0 +1,25 @@
+import spawn
+import time
+
+# Cancellation probe: `Spawn.cancel` is delivered at the target's next
+# yield point, and a pure-compute loop has none — the fiber runs to
+# completion regardless of when the cancel was requested.
+fn collatz(n: Int, steps: Int) : Int =
+  if n == 1 { steps }
+  else if n % 2 == 0 { collatz(n / 2, steps + 1) }
+  else { collatz(3 * n + 1, steps + 1) }
+
+fn hog(i: Int, limit: Int, acc: Int) : Int =
+  if i >= limit { acc } else { hog(i + 1, limit, acc + collatz(i, 0)) }
+
+fn main() : Int / Spawn + Stdout + Clock = {
+  Stdout.print("start")
+  nursery { n ->
+    let h = n.spawn(() => hog(1, 3000000, 0))
+    sleep(millis(5))
+    Stdout.print("cancel requested")
+    Spawn.cancel(h)
+  }
+  Stdout.print("nursery exited")
+  0
+}

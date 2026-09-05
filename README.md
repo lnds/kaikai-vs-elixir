@@ -21,7 +21,7 @@ built for.
 ## Disclaimer / methodology
 
 - **Verified with `Elixir 1.19.5 (compiled with Erlang/OTP 28)` (JIT, 14
-  schedulers) and `kaikai 0.104.0` (hanga-roa, stage 2, self-hosted)**,
+  schedulers) and `kaikai 0.114.0` (hanga-roa, stage 2, self-hosted)**,
   native backend; nothing here is backend-sensitive. First built against
   kaikai 0.99.6; 0.99.11 shipped an M:N work-stealing scheduler
   (`KAI_THREADS`, opt-in) mid-comparison and **moved cases 5 and 6**;
@@ -33,8 +33,16 @@ built for.
   case 4. The 0.104 re-verify also forced a **retraction**: case 5's
   wake-path-parking claim (filed as kai#1267) was a measurement artifact
   — conceded in [`discarded/`](discarded/wake-path-parking/), protocol
-  fixed. History kept in each case; cases 1–4 and beyond-elixir
-  re-verified unchanged.
+  fixed. 0.114.0 (ten releases of front-end work: symbol table, module
+  and namespace resolution, Perceus — **no scheduler change**) moved
+  nothing: every case re-verified identical, bar case 6's serial wall
+  drifting back 0.63 → 0.57 s. Two things did change around case 5:
+  upstream **closed the safepoint proposal (kai#1269) as not planned**,
+  making that gap a stated design position rather than pending work, and
+  re-measuring the cancellation probe exposed a variance the 0.104 write-up
+  had reported as a single lucky number — the fix and the finding behind
+  it (the entry fiber is pinned to the main thread) are in case 5. History
+  kept in each case; cases 1–4 and beyond-elixir re-verified unchanged.
 - Every Elixir "this compiles but misbehaves" claim is backed by the actual
   `elixirc` output (including its 1.19 type-checker warnings, when any) and
   the actual runtime error. **No strawmen**: the Elixir shown is the version
@@ -63,8 +71,8 @@ built for.
 | 2 | exhaustive-match | **kaikai** (safety) | Adding a variant compiles clean in Elixir and crashes at runtime with `CaseClauseError` (Dialyzer catches it, but opt-in); kaikai fails the build naming the missing variant. |
 | 3 | error-handling | **kaikai** (safety; ergonomics a wash) | `with` chains beautifully, but a forgotten `{:error, _}` path compiles and `MatchError`s at runtime; an unhandled effect row in kaikai does not compile. |
 | 4 | fault-tolerance | **Elixir** (narrowed) | A one-line `Supervisor` restarts the crashed worker and the app never stops. kaikai's primitives work and ahu runs the same real fault with restarts + escalation — but Elixir keeps the registry, the defaults, and 25 years of burn-in. |
-| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, with a retraction) | What survives is the *guarantee*: under saturation kaikai's heartbeat waits out a hog (~420 ms) and `Spawn.cancel` on pure-CPU never lands; the BEAM holds cadence under any load, even `+S 1`. With spare workers kaikai is already on cadence — the old "parking" claim was this repo's own measurement artifact, [conceded](discarded/wake-path-parking/). |
-| 6 | runtime-perf | **kaikai** (now by default) | 0.08 s vs the BEAM's parallel 0.49 s (~6×) with zero configuration since 0.104 (threads = ncpu); serial ~3.4× the JIT; ~12 MB RSS vs 92 MB (~1/8th). Stated drift: serial 0.52 → 0.63 s over three releases. |
+| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, with a retraction) | What survives is the *guarantee*: under saturation kaikai's heartbeat waits out a hog (~430 ms) and `Spawn.cancel` on pure-CPU never lands; the BEAM holds cadence under any load, even `+S 1`. With spare workers kaikai is already on cadence — the old "parking" claim was this repo's own measurement artifact, [conceded](discarded/wake-path-parking/). Upstream closed the safepoint proposal as not planned: a design position, not a pending fix. |
+| 6 | runtime-perf | **kaikai** (now by default) | 0.08 s vs the BEAM's parallel 0.43 s (~5×) with zero configuration since 0.104 (threads = ncpu); serial ~3.4× the JIT; ~12 MB RSS vs 92 MB (~1/8th). Stated drift: serial 0.52 → 0.63 → 0.57 s over four releases. |
 
 The pattern: 4–2 by case count, but each side wins exactly where it placed
 its bet — kaikai where the compiler can make bugs **unrepresentable** (1–3)
@@ -79,8 +87,8 @@ behavior when things fail or saturate (4–5).
 | 2 | [exhaustive-match](cases/02-exhaustive-match/) | kaikai (safety) | Tagged tuples + `@type` are a convention: add `:triangle` and the old `case` compiles clean, crashing at runtime (`CaseClauseError` — loud and named, credit given; Dialyzer can flag the call site, opt-in). kaikai's `match` fails the build naming the missing variant. |
 | 3 | [error-handling](cases/03-error-handling/) | kaikai (safety; ergonomics a wash) | `with` chains beautifully — stated plainly. But `{:ok, _} = ...` that forgets the error path compiles and `MatchError`s at runtime; kaikai's unhandled effect row does not compile. |
 | 4 | [fault-tolerance](cases/04-fault-tolerance/) | **Elixir** | A crashed worker under a one-line `Supervisor` restarts and the app never stops. kaikai's nursery default is fail-fast; a `Link`+`trap_exit` supervisor hand-rolls fine, and the **ahu** framework runs the same real fault under `Permanent`+`Limit(3)` with escalation (shown working!). Elixir keeps the win on registry, defaults, maturity — running ahu here found a policy-inverting `Transient` bug (filed as ahu#34, fixed upstream in v0.2.1, fix re-verified), which *is* the maturity gap, measured. |
-| 5 | [preemptive-scheduling](cases/05-preemptive-scheduling/) | **Elixir** (narrowed at 0.104, with a retraction) | With default-on threads and a spare worker, kaikai's heartbeat now lands on cadence — the earlier "wakes park behind a hog" claim was a measurement artifact, [conceded](discarded/wake-path-parking/). What survives: under **saturation** (hogs ≥ workers) the beat waits out a hog's full crunch, and `Spawn.cancel` on a pure-CPU fiber never lands. The BEAM preempts on reductions: every beat on time under any load, even `+S 1`. Spare capacity ≠ a guarantee. |
-| 6 | [runtime-perf](cases/06-runtime-perf/) | **kaikai** (now by default) | Collatz N=5M: kaikai serial 0.63 s (~3.4× the BEAM JIT); the same fiber binary runs in **0.08 s** with zero configuration since 0.104 (workers = ncpu) vs Elixir's 14-shard 0.49 s — at ~12 MB RSS vs the BEAM's 92 MB. Stated drift: kaikai's serial wall 0.52 → 0.63 s over three releases, and default RSS ~2 → ~12 MB when the worker pool became default-on (`KAI_THREADS=1` keeps the ~2 MB floor). |
+| 5 | [preemptive-scheduling](cases/05-preemptive-scheduling/) | **Elixir** (narrowed at 0.104, with a retraction) | With default-on threads and a spare worker, a *spawned* fiber's heartbeat lands on cadence — the earlier "wakes park behind a hog" claim was a measurement artifact, [conceded](discarded/wake-path-parking/). What survives: under **saturation** (hogs ≥ workers) the beat waits out a hog's full crunch, `Spawn.cancel` on a pure-CPU fiber never lands, and (new at 0.114) a sleep on the **nursery's own body** wakes ~330 ms late in ~4 of 5 runs, because the entry fiber is pinned to the main thread and cannot migrate. The BEAM preempts on reductions: every beat on time under any load, even `+S 1`. Spare capacity ≠ a guarantee. |
+| 6 | [runtime-perf](cases/06-runtime-perf/) | **kaikai** (now by default) | Collatz N=5M: kaikai serial 0.57 s (~3.4× the BEAM JIT); the same fiber binary runs in **0.08 s** with zero configuration since 0.104 (workers = ncpu) vs Elixir's 14-shard 0.43 s — at ~12 MB RSS vs the BEAM's 92 MB. Stated drift: kaikai's serial wall 0.52 → 0.63 → 0.57 s over four releases (0.114 clawed part of it back), and default RSS ~2 → ~12 MB when the worker pool became default-on (`KAI_THREADS=1` keeps the ~2 MB floor). |
 
 ### Beyond Elixir — kaikai-only features
 
@@ -106,7 +114,8 @@ gap; each is architecture kaikai does not have today:
   this list). With spare workers the difference is invisible; under
   saturation the beat waits out a hog's crunch, and cancellation of a
   pure-CPU fiber never lands (case 5, measured; the upstream safepoint
-  proposal is kai#1269).
+  proposal, kai#1269, was closed as not planned — this is a design
+  position, not a pending fix).
 - **Supervision as a *mature* framework.** kaikai has the primitives
   (monitor/link/trap-exit) and a young framework
   ([ahu](https://github.com/kaikailang-org/ahu): policies, intensity,
@@ -144,7 +153,9 @@ floor, briefly ceded to the BEAM by a 0.99.11 regression, came back at
 0.100.0 after an upstream fix. The ground moving under the comparison on
 every release — including two upstream bugs this repo found, filed, and
 saw fixed, and one claim upstream refuted right back — is the methodology
-working.
+working. So is re-running the suite against 0.114 and finding almost
+nothing moved: the same discipline that retracts a claim has to be able to
+report a quiet release.
 
 kaikai's bet is the **compiler**: make the bug classes that OTP so gracefully
 *survives* — typos, missing cases, forgotten error paths — unrepresentable
