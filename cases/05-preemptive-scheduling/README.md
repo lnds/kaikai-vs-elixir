@@ -1,8 +1,8 @@
 # Case 5 — cooperative fibers vs preemptive processes
 
 **Category C — Elixir wins, narrowed hard at 0.104.0, with a retraction,
-and re-verified unchanged on 0.114.0 — where upstream closed the fix
-proposal as not planned.** The same two-task program — one pure-CPU Collatz hog (~340 ms
+re-verified unchanged on 0.114.0 (where upstream closed the fix proposal
+as not planned) and on 0.192.6.** The same two-task program — one pure-CPU Collatz hog (~340 ms
 of crunch), one heartbeat that prints and sleeps 50 ms — still separates
 the two runtimes, but on a thinner line than this case previously claimed:
 kaikai 0.104 turns multi-threading **on by default** (worker count = host
@@ -42,7 +42,20 @@ framing anyway: kaikai chooses cooperative scheduling, and the latency
 guarantee is the price. Re-measuring that probe did turn up one thing the
 0.104 write-up got wrong, and a finding underneath it — both below.
 
-## The claim (0.104.0, re-verified on 0.114.0)
+**Status at 0.192.6.** The verdict and every core figure hold: `=1`
+starves for the full crunch, saturation makes the beat wait out a hog,
+`Spawn.cancel` on a pure-CPU fiber never lands. Two things moved. (1) The
+entry-fiber pin (below) now bites in ~1 run in 13 instead of ~4 in 5, so
+the `cancel requested` line is on time in 30/30 runs. (2) **Harness trap:**
+since 0.171 kaikai block-buffers stdout when it is not a TTY and flushes
+only when the runtime blocks, writes stderr, or exits. Piped into the
+timestamper, `start` is not flushed until the entry fiber first blocks, so
+at `KAI_THREADS=1` the anchor itself lands after the hog and the
+starvation disappears from the numbers (`[0/52/104] … hog done 156 ms`,
+for a hog that takes ~325 ms). All runs below go through a pty (`script`)
+so stdout is line-buffered and the anchor is honest again.
+
+## The claim (0.104.0, re-verified on 0.114.0 and 0.192.6)
 
 > kaikai schedules cooperatively at every thread count — the docs are
 > explicit: cancellation lands "at the next yield point", "there is no
@@ -50,23 +63,26 @@ guarantee is the price. Re-measuring that probe did turn up one thing the
 > cadence. It becomes visible exactly when capacity runs out or control
 > must be taken away: (a) `KAI_THREADS=1` — one worker, the beat waits out
 > the full crunch; (b) saturation — 16 hogs on 14 default workers, first
-> beat at ~420 ms; (c) `Spawn.cancel` on a pure-CPU fiber — requested at
-> ~6 ms, the fiber runs its full ~340 ms anyway. The BEAM preempts on
+> beat at ~350–420 ms; (c) `Spawn.cancel` on a pure-CPU fiber — requested
+> at ~5 ms, the fiber runs its full ~325 ms anyway. The BEAM preempts on
 > reduction count: every beat on time under all three shapes, even
 > `+S 1`. Parallelism buys latency only while capacity is spare;
 > preemption is a guarantee.
 
-## Measured (kaikai 0.114.0, warm binary, t0 = the program's `start` line)
+## Measured (kaikai 0.192.6, warm binary, stdout on a pty, t0 = the program's `start` line)
 
 [`kaikai/starve.kai`](kaikai/starve.kai) built `--release` (1 hog + heartbeat):
 
 ```text
 -- KAI_THREADS=1 --        -- KAI_THREADS=2 --        -- default (14 = ncpu) --
-[  320ms] heartbeat 3      [    0ms] heartbeat 3      [    0ms] heartbeat 3
-[  372ms] heartbeat 2      [   49ms] heartbeat 2      [   47ms] heartbeat 2
-[  424ms] heartbeat 1      [  101ms] heartbeat 1      [   99ms] heartbeat 1
-[  476ms] hog done         [  327ms] hog done         [  331ms] hog done
+[  322ms] heartbeat 3      [    0ms] heartbeat 3      [    0ms] heartbeat 3
+[  374ms] heartbeat 2      [   50ms] heartbeat 2      [   50ms] heartbeat 2
+[  426ms] heartbeat 1      [  102ms] heartbeat 1      [  102ms] heartbeat 1
+[  478ms] hog done         [  328ms] hog done         [  326ms] hog done
 ```
+
+`KAI_THREADS=4` is the same as `=2` and the default (0/50/102, done
+~326 ms). 3–4 warm runs per column, spread ≤ 4 ms.
 
 [`kaikai/starve_saturate.kai`](kaikai/starve_saturate.kai) — 16 hogs over
 the 14 default workers, and [`kaikai/cancel_probe.kai`](kaikai/cancel_probe.kai)
@@ -74,13 +90,20 @@ the 14 default workers, and [`kaikai/cancel_probe.kai`](kaikai/cancel_probe.kai)
 
 ```text
 -- 16 hogs, default(14) --      -- Spawn.cancel of a pure-CPU fiber --
-[  434ms] heartbeat 3           [    2ms] cancel requested   (best of 15; see below)
-[  484ms] heartbeat 2           [  331ms] nursery exited     (fiber ran to completion)
-[  535ms] heartbeat 1
-[  764ms] hogs done
+[  377ms] heartbeat 3           [    5ms] cancel requested   (30/30 runs at 4–5 ms)
+[  429ms] heartbeat 2           [  326ms] nursery exited     (fiber ran to completion, 30/30)
+[  481ms] heartbeat 1
+[  722ms] hogs done
 ```
 
-(all runs: `acc=428343355`; each column stable across 3+ warm runs)
+Saturation over 10 runs: first beat 352–421 ms, hogs done 701–758 ms (one
+core was held by an unrelated process during these runs, so 16 hogs met
+~13 free workers). (all runs: `acc=428343355`)
+
+0.114.0 figures for the same programs: `=1` 320/372/424, done 476;
+`=2` 0/49/101, done 327; default 0/47/99, done 331; saturated first beat
+434 ms, hogs done 764 ms; cancel requested at 2 ms in 4/15 runs and
+~330 ms in 11/15, nursery exited 331 ms.
 
 [`elixir/starve.exs`](elixir/starve.exs), same anchor:
 
@@ -91,6 +114,9 @@ the 14 default workers, and [`kaikai/cancel_probe.kai`](kaikai/cancel_probe.kai)
 [  105ms] heartbeat 1             [  104ms] heartbeat 1
 [ 1022ms] hog done                [ 1512ms] hog done: acc=428343355
 ```
+
+(Elixir re-run on the same day as the 0.192.6 figures: 2/54/107 and
+1/52/103, hog done 1016–1064 / 1468–1510 ms — unchanged.)
 
 `+S 1` **is** the saturated shape — one hog fully occupies the only
 scheduler — and every beat still lands on its 50 ms cadence, ~1.5 s before
@@ -104,7 +130,7 @@ reduction budget — was
 **closed it as not planned** (with
 [kai#1268](https://github.com/lnds/kaikai/issues/1268), the cancellation
 measurement, folded into it and closed first). Re-verified unchanged on
-0.114: this is settled design, not pending work.
+0.114 and 0.192.6: this is settled design, not pending work.
 
 ### A correction and a new finding: the entry fiber is pinned
 
@@ -134,6 +160,14 @@ worker, the sleeper waits out the full crunch — with 13 workers idle. It
 is a coin flip on where the hog lands, which is why the same binary gives
 both shapes.
 
+**At 0.192.6 the coin is heavily weighted.** The pin is still in the
+runtime (the entry fiber carries `pinned_main`), but over 40 warm runs the
+nursery-body sleeper woke late (~330 ms) in **3** and on time (61–63 ms)
+in 37; the spawned sleeper was on time in all 40. The cancellation probe,
+which sleeps on the same entry fiber, requested its cancel at 4–5 ms in
+30/30 runs. The mechanism behind the shift was not investigated; the
+measurement is what is reported.
+
 Note what this is and is not. It is *not* the retracted parking claim
 resurfacing: that one alleged spawned fibers park behind hogs, was
 measured off a cold binary, and is [conceded](../../discarded/wake-path-parking/)
@@ -154,23 +188,27 @@ earlier draft, which would have measured nothing).
 ```sh
 kai build --release kaikai/starve.kai          -o /tmp/starve
 kai build --release kaikai/starve_saturate.kai -o /tmp/starve_sat
-# t0 anchors on the program's own "start" line; discard the first (cold) run
-TSA='my $t0; while (<>) { if (/^start/) { $t0 = time; next }
+# t0 anchors on the program's own "start" line; discard the first (cold) run.
+# stdout must be a TTY: off a TTY kaikai block-buffers it (since 0.171) and
+# `start` would only flush when the entry fiber first blocks. `script` gives a pty.
+TSA='my $t0; while (<>) { s/\r//g; s/^\^D\x08*//; if (/^start/) { $t0 = time; next }
      printf "[%5dms] %s", (time-$t0)*1000, $_ }'
-/tmp/starve; KAI_THREADS=1 /tmp/starve | perl -MTime::HiRes=time -e "$TSA"  # starves
-KAI_THREADS=2 /tmp/starve             | perl -MTime::HiRes=time -e "$TSA"  # cadence
-/tmp/starve                           | perl -MTime::HiRes=time -e "$TSA"  # cadence (default = ncpu)
-/tmp/starve_sat                       | perl -MTime::HiRes=time -e "$TSA"  # saturated: beat waits
+pty() { script -q /dev/null "$@" </dev/null; }
+pty /tmp/starve >/dev/null
+KAI_THREADS=1 pty /tmp/starve | perl -MTime::HiRes=time -e "$TSA"  # starves
+KAI_THREADS=2 pty /tmp/starve | perl -MTime::HiRes=time -e "$TSA"  # cadence
+pty /tmp/starve               | perl -MTime::HiRes=time -e "$TSA"  # cadence (default = ncpu)
+pty /tmp/starve_sat           | perl -MTime::HiRes=time -e "$TSA"  # saturated: beat waits
 kai build --release kaikai/wake_entry_fiber.kai -o /tmp/wef
-for i in 1 2 3 4 5; do /tmp/wef | perl -MTime::HiRes=time -e "$TSA"; done  # entry fiber: ~4/5 late
-elixir elixir/starve.exs               | perl -MTime::HiRes=time -e "$TSA"
-elixir --erl "+S 1" elixir/starve.exs  | perl -MTime::HiRes=time -e "$TSA"
+for i in $(seq 20); do pty /tmp/wef | perl -MTime::HiRes=time -e "$TSA"; done  # entry fiber: late in ~1/13
+pty elixir elixir/starve.exs              | perl -MTime::HiRes=time -e "$TSA"
+pty elixir --erl "+S 1" elixir/starve.exs | perl -MTime::HiRes=time -e "$TSA"
 ```
 
 ## Where kaikai wins / the trade-off
 
 - **Preemption costs throughput.** Reduction accounting is part of why the
-  same serial loop runs ~3.4× slower on the BEAM (case 6). Cooperative
+  same serial loop runs ~3.5× slower on the BEAM (case 6). Cooperative
   fibers spend zero cycles on it; with no latency requirement that is the
   right trade.
 - **The common case is now covered by default.** Since 0.104 the worker

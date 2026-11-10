@@ -22,6 +22,11 @@ still in `/tmp`, runtime baked in. Re-run **warm**:
 (6/6 on cadence; starve4 at =8: 4/4 on cadence; starve4 at =4: ~350 ms, not 858)
 ```
 
+Re-run on kaikai 0.192.6 with the corrected protocol (warm, stdout on a
+pty — see case 5 for why a pipe now hides the anchor): `starve` at `=2`
+0/50/102 ms in 4/4 runs; 4 hogs at `=8` 0/50/102 ms in 4/4; 4 hogs
+saturating `=4` first beat at 337–344 ms in 4/4. Still no parking.
+
 The parking never happened. The measurement error: the timestamp origin was
 the *pipeline* start (`perl -ne 'BEGIN{$t0=time}'`), and a cold kaikai
 binary on macOS takes ~250–350 ms to its first print (page faults +
@@ -38,10 +43,9 @@ Two things survive, stated there with fresh measurements:
   holds cadence even at `+S 1`. That is the preemption guarantee, and it is
   still Elixir's.
 - **Cancellation is cooperative** ([kai#1268](https://github.com/lnds/kaikai/issues/1268),
-  folded into the still-open
-  [kai#1269](https://github.com/lnds/kaikai/issues/1269) safepoint
-  proposal): `Spawn.cancel` on a pure-CPU fiber never lands — re-verified
-  on 0.104.0.
+  folded into the [kai#1269](https://github.com/lnds/kaikai/issues/1269)
+  safepoint proposal, since closed as not planned): `Spawn.cancel` on a
+  pure-CPU fiber never lands — re-verified on 0.104.0, 0.114.0 and 0.192.6.
 
 One accidental find from the forensics: the 0.100.0 runtime hung once in
 ~12 warm runs of the 4-hog repro at `KAI_THREADS=4` (a real intermittent

@@ -73,9 +73,14 @@ build`:
 
 ```text
 error: effect not handled: Parse
+  --> parse_missing_handler.kai:15:41
+     |
+  15 |   Stdout.print("sum=#{int_to_string(sum3("10", "oops", "12"))}")
+     |                                         ^
   = note: `main`'s declared row does not include `Parse`
-  = help: either declare `main : ... / Parse`, or wrap this call site in
-          `handle { ... } with Parse { ... }`
+  = note: missing effect: `Parse`
+  = note: enclosing row: Stdout
+  = help: add `/ Parse` to `main`'s return type, or wrap the call in `handle { ... } with Parse { ... }`
 ```
 
 There is no way to write "assume success" by accident. (You *can* write it

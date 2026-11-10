@@ -53,7 +53,9 @@ about the non-exhaustive `case` itself when no caller exercises it.
 ## kaikai — the missing arm is a build error
 
 [`kaikai/area.kai`](kaikai/area.kai) compiles and runs precisely because
-every constructor is handled (`circle: 28.2743 / square: 9 / triangle: 6`).
+every constructor is handled (`circle: 28.274309999999996 / square: 9 /
+triangle: 6` — since kaikai prints a `Real` as its shortest round-trip
+form; 0.114 printed `28.2743`).
 Delete the `Triangle` arm —
 [`kaikai/area_missing_triangle.kai`](kaikai/area_missing_triangle.kai),
 `kai build`:

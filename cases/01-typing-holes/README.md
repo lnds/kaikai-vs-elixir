@@ -79,7 +79,10 @@ warning appears.)
 
 ```text
 error: no field 'retires' on AppConfig (did you mean `.retries`?)
-  --> config_typo.kai:1:18
+  --> config_typo.kai:11:45
+     |
+  11 |   Stdout.print("retries: #{int_to_string(cfg.retires)}")
+     |                                             ^
 ```
 
 And there is no unchecked access path to fall back to: a `Map` read returns

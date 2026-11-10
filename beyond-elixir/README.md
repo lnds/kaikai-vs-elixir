@@ -25,4 +25,6 @@ is in the [top-level README](../README.md#what-elixir-has-that-kaikai-has-no-for
 | 2 | [user-kinds](02-user-kinds/) | The `Measure` kind is not special — you declare your own abelian kinds. Two kinds never unify, so `Metric.m + Imperial.ft` is rejected. | Nothing. No static types, so no kind system; a macro could build runtime tags, not compile-time rejection. |
 | 3 | [contracts](03-contracts/) | `requires` / `ensures` — pre *and post*conditions in the signature, checked at runtime (and statically for literal args) with a structured violation panic. | Guards — real but preconditions only, restricted to a decidable subset, and a violation is a `FunctionClauseError`, not a named contract breach. No `ensures` anywhere. |
 
-All three verified on kaikai 0.99.6; the outputs in each README are real.
+All three verified on kaikai 0.99.6 and re-verified on 0.192.6 (only change:
+units-of-measure prints the full round-trip `Real`); the outputs in each
+README are real.

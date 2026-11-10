@@ -23,14 +23,17 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
   **wake-path-parking — this repo's own kaikai claim, refuted by upstream
   and conceded** (see case 5 facts below).
 - Verified against **Elixir 1.19.5 / OTP 28** (JIT, 14 schedulers, asdf) and
-  **kaikai 0.114.0** (native backend, self-hosted stage 2); first built on
+  **kaikai 0.192.6** (native backend, self-hosted stage 2); first built on
   0.99.6, re-verified on 0.99.11 (M:N threading **moved cases 5 and 6**),
   0.100.0 (RSS regression fixed; ahu#34 fixed in v0.2.1), 0.104.0
   (**KAI_THREADS defaults to ncpu** → case 6 wins by default, case 5
   narrowed + parking claim retracted), and 0.114.0 (**quiet release**: ten
   releases of front-end work, no scheduler change; everything re-verified
   identical bar case 6's serial wall drifting back 0.63 → 0.57 s — see
-  the 0.114 notes below). 14-core machine (matters for cases 5–6).
+  the 0.114 notes below), and 0.192.6 (no verdict moved; case 6 default
+  RSS back to ~2 MB, case 5's entry-fiber pin now rare, case 4's ahu pin
+  moved to `main`, case 5 harness needs a pty — see the 0.192 notes
+  below). 14-core machine (matters for cases 5–6).
 
 ### Case status (who wins)
 
@@ -39,9 +42,9 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
 | 1 | typing-holes | kaikai (safety) — struct/dot typos: 1.19 **warns** (exit 0, .beam ships); `cfg[:typo]` Access: silent nil; kaikai: compile error w/ did-you-mean. Bonus finding: a crashing .exs dies before its buffered warning prints |
 | 2 | exhaustive-match | kaikai (safety) — tagged tuples + @type/@spec: elixirc silent, runtime CaseClauseError (loud+named, credited); dialyzer flags the call site (opt-in, needs PLT + elixir ebin on code path); kaikai names the missing variant at build |
 | 3 | error-handling | kaikai (safety; ergonomics a wash) — `with` is genuinely good; forgetting `{:error,_}` compiles + MatchError; kaikai unhandled effect row = compile error |
-| 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug — filed as ahu#34, **fixed upstream in v0.2.1**, fix re-verified both directions (below) |
-| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, WITH A RETRACTION) — threads default-on: any *spawned* fiber's beat on 50 ms cadence (0/49/99 at `=2`, `=4`, default 14). The old "wake parks behind hog" claim (kai#1267) was OUR measurement artifact — conceded in `discarded/wake-path-parking/`. What survives for Elixir: `=1` starves (~320 ms), SATURATION (16 hogs ≥ 14 workers → first beat ~430 ms), `Spawn.cancel` on pure-CPU never lands (fiber runs full ~330 ms), and NEW at 0.114: a sleep on the NURSERY BODY wakes ~335 ms late in ~4/5 runs (entry fiber pinned to main thread, kai#1556) while a spawned sleeper is 2/54 ms every time. kai#1269 (safepoint proposal) CLOSED not-planned → design position, not pending fix. BEAM: cadence under any load even `+S 1` |
-| 6 | runtime-perf | **kaikai, now BY DEFAULT** — 0.114.0 Collatz N=5M: fibers default (14 threads) **0.08 s** (beats Elixir 14-shard 0.43 s ~5×); serial 0.57 s (drift 0.52→0.57→0.63→0.57, stated); Elixir serial 1.95 s. RSS: default worker pool costs ~11–12 MB (vs BEAM 92 MB); `KAI_THREADS=1` keeps the ~2 MB floor. BEAM boot floor now ~0.16 s. Same answer everywhere: n=3732423 steps=596 |
+| 4 | fault-tolerance | **Elixir** (narrowed) — one-line Supervisor restarts a crashed GenServer, app never stops. kaikai nursery default = fail-fast exit 1; Link+trap_exit hand-rolled supervisor WORKS; AND the **ahu** framework column runs the same real fault under `restartable_cell(Permanent, Limit(3))`: 3 restarts w/ state reset + escalation, exit 0. Elixir keeps registry/defaults/maturity. Running ahu found a real bug — filed as ahu#34, **fixed upstream in v0.2.1**, fix re-verified both directions (below). At 0.192.6 the ahu pin is `main` (f3cce7e): no ahu tag builds on 0.192 |
+| 5 | preemptive-scheduling | **Elixir** (narrowed hard at 0.104, WITH A RETRACTION) — threads default-on: any *spawned* fiber's beat on 50 ms cadence (0/49/99 at `=2`, `=4`, default 14). The old "wake parks behind hog" claim (kai#1267) was OUR measurement artifact — conceded in `discarded/wake-path-parking/`. What survives for Elixir: `=1` starves (~320 ms), SATURATION (16 hogs ≥ 14 workers → first beat ~430 ms at 0.114, 352–421 ms at 0.192.6), `Spawn.cancel` on pure-CPU never lands (fiber runs full ~325 ms), and a sleep on the NURSERY BODY wakes ~330 ms late (entry fiber pinned to main thread, kai#1556) — ~4/5 runs at 0.114, 3/40 at 0.192.6 — while a spawned sleeper is on time every run. kai#1269 (safepoint proposal) CLOSED not-planned → design position, not pending fix. BEAM: cadence under any load even `+S 1` |
+| 6 | runtime-perf | **kaikai, now BY DEFAULT** — 0.192.6 Collatz N=5M: fibers default (14 threads) **0.08 s** (beats Elixir 14-shard 0.42 s ~5×); serial 0.56 s (drift 0.52→0.57→0.63→0.57→0.56, stated); Elixir serial 1.97 s. RSS: serial default 1.8 MB, fibers default 3.5 MB (0.104–0.114 worker-pool cost of ~11–12 MB is gone) vs BEAM ~92 MB. BEAM boot floor ~0.15 s. Same answer everywhere: n=3732423 steps=596 |
 
 ## Elixir facts that bit / matter here
 
@@ -66,7 +69,7 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
 - `elixirc` in a dir with stale `Elixir.*.beam` redefines modules (warning
   noise) — `rm -f Elixir.*.beam` between runs; NB `rm -f *.beam` errors in
   zsh when no match (`setopt`-dependent), ignore or glob-guard.
-- BEAM boot floor here: **~0.22 s** (`time elixir -e ""`); kaikai binary
+- BEAM boot floor here: **~0.15 s** (`time elixir -e ""`); kaikai binary
   ~0 ms. Included inside case 6's Elixir rows, stated in the README.
 - Collatz sanity outputs: N=1M `n=837799 steps=524`; N=5M `n=3732423
   steps=596` — verify before timing anything.
@@ -87,12 +90,23 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
   supervision framework/strategies — that's Elixir's win, stated as such.
 - **Nursery default is fail-fast**: a child fault cancels siblings, program
   prints `kai: nursery child cancelled; no survivors`, exit 1.
-- **ahu (kaikailang-org/ahu, v0.2.1) is kaikai's fault-tolerance framework**
+- **ahu (kaikailang-org/ahu) is kaikai's fault-tolerance framework**
   — cells (typed GenServer shape) + restart helpers (`Permanent | Transient
   | Temporary`, `Limit(n)`, `with_restart_backoff`, escalation via Cancel;
   nesting composes). Case 4's `kaikai-ahu/` package runs it, git-pinned:
   `ahu = { source = "https://github.com/kaikailang-org/ahu", ref =
-  "v0.2.1" }` (`kai install` then `kai run .`). The old TRAP — kai 0.99.6
+  "main" }`, lock at f3cce7e (`kai fetch` then `kai run .`; bare
+  `kai install` still works with a deprecation warning). It was `ref =
+  "v0.2.1"` until 0.192: the compiler now rejects uppercase type
+  parameters (`error: type parameters must start with a lowercase
+  letter` on `StepResult[State]`), v0.2.1..v0.2.3 all fail, and the port
+  (ahu bccf9b7) is on `main`, untagged. When ahu tags it, pin the tag.
+  `ref` must be a branch or tag: a commit sha fails the clone. Two
+  kai-pkg traps seen at 0.192.6: the v0.2.1 lock's sha (b1d243f) no
+  longer exists in ahu's history and `kai fetch` silently rewrote it to
+  the tag's commit (c0de5d9), and a failed clone (`ref` = a full sha)
+  prints `git clone failed` but **exits 0** with a lock of 0 entries —
+  check the lock, not the exit code. The old TRAP — kai 0.99.6
   silently ignored the documented `{ git = ..., tag = ... }` form (filed as
   kaikai#1215) — was FIXED in 0.99.13: both spellings resolve, unknown
   forms error loudly (verified on 0.100.0).
@@ -147,17 +161,32 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
   one hog and 13 workers idle, because that fiber cannot migrate off the
   worker the hog landed on; a SPAWNED sleeper is 2/54 ms every run in the
   same program. It is a coin flip on hog placement, hence the variance.
+  At 0.192.6 the pin is still in the runtime (`pinned_main`) but the coin
+  is weighted: nursery-body sleeper late in 3/40 runs, cancel requested on
+  time 30/30.
   This is NOT the retracted parking claim (that one alleged *spawned*
   fibers park, off a cold binary) — it survives the corrected protocol.
   Consequence for measurement: **put anything latency-sensitive in a
   spawned fiber, never in the nursery body**, or you measure the pin. This
   is exactly what made the old `[6ms] cancel requested` figure wrong — it
   was the lucky 4-in-15 run reported as the rule.
-- **RSS: the default worker pool costs ~11–12 MB** (0.104+, any workload
-  size); `KAI_THREADS=1` keeps the ~2 MB floor (N=1000: 1.9 MB). The
-  0.99.11 regression (~169.5 MB/~758 MB) stays fixed. Perf drift noted
-  honestly: serial N=5M 0.52 (0.99.11) → 0.57 (0.100) → 0.63 (0.104) →
-  0.57 s (0.114 — first time it moved back).
+- **RSS: the default worker pool cost ~11–12 MB at 0.104–0.114; at
+  0.192.6 it is gone** — default serial 1.8 MB, default 14-thread fibers
+  3.5 MB, `KAI_THREADS=1` fibers 2.1 MB (N=1000: 2.1 MB at `=1`, 3.6 MB
+  default). The 0.99.11 regression (~169.5 MB/~758 MB) stays fixed. Perf
+  drift noted honestly: serial N=5M 0.52 (0.99.11) → 0.57 (0.100) → 0.63
+  (0.104) → 0.57 (0.114) → 0.56 s (0.192.6).
+- **stdout is block-buffered off a TTY since 0.171** (`kai_set_args` only
+  sets line buffering when `isatty`); the runtime flushes before it blocks,
+  writes stderr, or exits. Piped into a timestamper, a program's `start`
+  line is held until the entry fiber first blocks, so at `KAI_THREADS=1`
+  the anchor lands after the hog and starvation vanishes from the numbers
+  (`[0/52/104] hog done 156 ms` for a ~325 ms hog). Case 5 runs every
+  kaikai and Elixir binary under `script -q /dev/null cmd </dev/null` (a
+  pty; the `</dev/null` is needed when stdin is not a terminal).
+- **0.192.6 visible warnings**: case 4 ahu `main.kai` warns `unused import
+  spawn` and that `with_mailbox` in tail position is not a guaranteed tail
+  call; `starve_saturate.kai` warns `unused binding rs`. All exit 0.
 - **0.105–0.114 was all front end**: symbol table + SymId identity, module
   and namespace resolution (#1800/#1897 lanes), Perceus fixes, fmt. No
   scheduler, effect-row or exhaustiveness change — which is why the whole
@@ -178,10 +207,10 @@ gradual type checker. Remote: github.com/lnds/kaikai-vs-elixir, **private**
 ## Benchmarking notes
 
 - Method: `kai build --release` vs `elixir file.exs`, wall = min of 3 warm
-  runs via `/usr/bin/time -l`, peak RSS from the same. N from argv, result
-  printed. 14-core arm64 mac.
+  runs via `/usr/bin/time -l`, peak RSS from the same (max resident bytes
+  / 2^20, labelled MB). N from argv, result printed. 14-core arm64 mac.
 - Elixir parallel = `Task.async_stream` over `1..limit//chunk` range starts,
-  `shards = System.schedulers_online()` (14). ~0.43 s wall at last re-run.
+  `shards = System.schedulers_online()` (14). ~0.42 s wall at last re-run.
 - BEAM RSS is ~92 MB regardless of serial/parallel — it's the VM floor, not
   the workload.
 - **Latency measurements (case 5): anchor t0 on a line the program itself

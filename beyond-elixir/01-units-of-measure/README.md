@@ -36,8 +36,11 @@ fn main() : Unit / Stdout = {
 `kai run kaikai/speed.kai`:
 
 ```text
-speed = 10.4384 m/s
+speed = 10.438413361169102 m/s
 ```
+
+(0.114 printed `10.4384`; kaikai now prints a `Real` as its shortest
+round-trip form.)
 
 ## It fails to compile — the Mars Orbiter bug
 
@@ -66,6 +69,6 @@ error: type mismatch in arithmetic operator '+'
 ## Reproduce
 
 ```sh
-kai run kaikai/speed.kai            # speed = 10.4384 m/s
+kai run kaikai/speed.kai            # speed = 10.438413361169102 m/s
 kai build kaikai/mars_orbiter.kai   # error: type mismatch
 ```

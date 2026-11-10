@@ -87,7 +87,8 @@ supervision of *typed* actors couples the supervisor's message type to a
 ## kaikai + ahu — the framework column
 
 Elixir never arrives without OTP, so fairness demands kaikai's framework
-layer be run too. [ahu](https://github.com/kaikailang-org/ahu) (v0.2.1) is
+layer be run too. [ahu](https://github.com/kaikailang-org/ahu) (main
+`f3cce7e`; see the pin note below) is
 kaikai's concurrency/fault-tolerance package — *cells* (typed stateful
 message loops, the GenServer shape) plus *restart helpers* (`Permanent |
 Transient | Temporary`, `Limit(n)` intensity, fixed backoff, escalation via
@@ -111,6 +112,25 @@ every cycle, never 6), an intensity budget, and clean escalation — the OTP
 pattern, in a typed language, working against a genuine fault. The Elixir
 demo above is no longer "framework vs no framework".
 
+**Pin note (kaikai 0.192.6).** No tagged ahu release builds on kaikai
+0.192: the compiler now requires lowercase type parameters, and v0.2.1
+(like v0.2.3, the newest tag) declares `StepResult[State]`:
+
+```text
+error: type parameters must start with a lowercase letter
+  --> .../ahu/cell.kai:31:21
+     |
+  31 | pub type StepResult[State] = Continue(State) | Done
+     |                     ^
+```
+
+ahu's `main` carries the port (`bccf9b7`, "fix(cell)!: build on kaikai
+0.192"), untagged, so the dependency now tracks `ref = "main"` with the
+lock at `f3cce7e`. `main.kai` itself needed no change, and the output above
+is byte-identical to the v0.2.1 run on 0.114. `kai-pkg` accepts only a
+branch or tag name as `ref` (a commit sha fails the clone), which is why the
+pin is a branch plus the lock rather than a sha.
+
 The honest edges, found by running it:
 
 - **Bug (upstream, found here, filed as
@@ -123,7 +143,8 @@ The honest edges, found by running it:
   covering both abnormal shapes; re-verified here both ways on the pinned
   v0.2.1: this case's division-by-zero under `Transient` now restarts 3×
   and escalates (same output as the `Permanent` run above), and a clean
-  exit still runs once with no restart.
+  exit still runs once with no restart. Re-verified both ways again on
+  kaikai 0.192.6 with ahu `main`.
 - **A cell crash mid-driver is unobserved** — documented in ahu itself: the
   trap-exit channel is typed `String` and the body's mailbox is typed `Msg`,
   so only the *driver* fiber's death reaches the supervisor; a cell that
@@ -140,9 +161,11 @@ The honest edges, found by running it:
 elixir elixir/supervised.exs          # crash logged, restart, exit 0
 kai build kaikai/crash_nursery.kai -o /tmp/cn && /tmp/cn; echo $?   # no survivors, 1
 kai build kaikai/supervise.kai -o /tmp/sv && /tmp/sv; echo $?       # trapped + restart, 0
-cd kaikai-ahu && kai install && kai run .   # ahu: 3 restarts + escalation, 0
-# (the dep is git-pinned: ahu = { source = "https://github.com/kaikailang-org/ahu",
-#  ref = "v0.2.1" }. History: kai 0.99.6 silently ignored the documented
+cd kaikai-ahu && kai fetch && kai run .     # ahu: 3 restarts + escalation, 0
+# (`kai install` with no argument still works but warns it is now `kai fetch`.
+#  The dep is git-pinned: ahu = { source = "https://github.com/kaikailang-org/ahu",
+#  ref = "main" }, lock at f3cce7e; v0.2.1 until kaikai 0.192 required
+#  lowercase type parameters. History: kai 0.99.6 silently ignored the documented
 #  `{ git = ..., tag = ... }` form — resolved "1 dependency", locked 0
 #  entries, no error (filed as kaikai#1215). Fixed in 0.99.13: both
 #  spellings now resolve, and unknown forms error loudly.)

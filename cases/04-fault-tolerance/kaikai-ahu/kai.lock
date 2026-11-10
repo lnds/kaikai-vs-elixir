@@ -6,6 +6,6 @@
 [[package]]
 name = "ahu"
 source = "https://github.com/kaikailang-org/ahu"
-ref = "v0.2.1"
-sha = "b1d243f1b773a0ba0165c95635c958616ced77ea"
+ref = "main"
+sha = "f3cce7e5df814fe8e42142c69f329f2442379a36"
 
